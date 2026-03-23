@@ -29,6 +29,17 @@ async function post(port: number, path: string, data: unknown): Promise<{ status
   return { status: res.status, body };
 }
 
+describe('Dashboard HTML', () => {
+  it('embedded JavaScript is syntactically valid', async () => {
+    const { dashboardHtml } = await import('../src/dashboard-html.js');
+    const html = dashboardHtml();
+    const scriptMatch = html.match(/<script[^>]*>([\s\S]*?)<\/script>/);
+    expect(scriptMatch).toBeTruthy();
+    const js = scriptMatch![1];
+    expect(() => new Function(js)).not.toThrow();
+  });
+});
+
 describe('Dashboard Server - Empty', () => {
   let server: DashboardServer;
   let port: number;

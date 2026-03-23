@@ -9,3 +9,6 @@ export { DashboardServer, startDashboard, stopDashboard } from './dashboard-serv
 export { dashboardHtml } from './dashboard-html.js';
 export type { OvidConfig, PolicySource } from './config.js';
 export { DEFAULT_CONFIG, resolveConfig } from './config.js';
+export type { EvaluateRequest, EvaluateResult } from './evaluate.js';
+export { evaluateMandate } from './evaluate.js';
+export { MandateEngine } from './mandate-engine.js';
