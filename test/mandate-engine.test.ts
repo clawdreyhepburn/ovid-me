@@ -4,7 +4,7 @@ import type { CedarMandate } from '../src/config.js'
 import type { PolicySource } from '../src/config.js'
 
 function mkMandate(...policies: string[]): CedarMandate {
-  return { rarFormat: 'cedar', cedar_policies: policies }
+  return { rarFormat: 'cedar', policySet: policies.join("\n") }
 }
 
 const readOnly = mkMandate('permit(principal, action == Ovid::Action::"read_file", resource);')

@@ -4,7 +4,7 @@ import type { EvaluateRequest } from '../src/evaluate.js'
 import type { CedarMandate } from '../src/config.js'
 
 function mkMandate(...policies: string[]): CedarMandate {
-  return { rarFormat: 'cedar', cedar_policies: policies }
+  return { rarFormat: 'cedar', policySet: policies.join("\n") }
 }
 
 describe('evaluateMandate', () => {

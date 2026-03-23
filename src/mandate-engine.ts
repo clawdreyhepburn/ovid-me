@@ -47,7 +47,7 @@ export class MandateEngine {
       // Also evaluate shadow mandate if configured
       let shadowDecision: 'allow' | 'deny' | undefined
       if (this.config.shadowMandate) {
-        const shadowText = this.config.shadowMandate.cedar_policies.join('\n')
+        const shadowText = this.config.shadowMandate.policySet
         const shadowPolicies = parsePolicies(shadowText)
         const shadowResult = evaluatePolicies(shadowPolicies, request, 'shadow')
         shadowDecision = shadowResult.decision
