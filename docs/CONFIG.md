@@ -1,6 +1,6 @@
-# OVID Configuration Reference
+# OVID-ME Configuration Reference
 
-OVID is designed to work out of the box for a solo developer and scale to enterprise multi-domain deployments. All configuration is deployment-wide — per-agent behavior is expressed through mandates, not config overrides.
+OVID-ME is designed to work out of the box for a solo developer and scale to enterprise multi-domain deployments. All configuration is deployment-wide — per-agent behavior is expressed through mandates, not config overrides.
 
 ## Quick Start
 
@@ -8,6 +8,7 @@ Zero config gets you working tokens with no enforcement:
 
 ```typescript
 import { createOvid, verifyOvid, generateKeypair } from '@clawdreyhepburn/ovid'
+import { resolveConfig } from '@clawdreyhepburn/ovid-me'
 
 const root = await generateKeypair()
 const child = await generateKeypair()
@@ -31,7 +32,7 @@ Everything below is opt-in.
 ## Full Configuration
 
 ```typescript
-import { OvidConfig } from '@clawdreyhepburn/ovid'
+import { OvidMeConfig } from '@clawdreyhepburn/ovid-me'
 
 const config: OvidConfig = {
 

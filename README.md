@@ -33,7 +33,7 @@ const agent = await createOvid({
 const logger = createAuditLogger('./audit.jsonl');
 
 // Log a mandate evaluation decision
-logger.logDecision(agent.claims.jti, 'read_file', '/src/main.ts', 'allow-proven', ['policy-read']);
+logger.logDecision(agent.claims.jti, 'read_file', '/src/main.ts', 'allow', ['policy-read']);
 logger.logDecision(agent.claims.jti, 'exec', 'rm -rf /', 'deny', ['policy-safety']);
 ```
 
@@ -64,9 +64,10 @@ const server = await startDashboard({
 // → OVID Dashboard: http://localhost:19831
 ```
 
-## Depends On
+## Related Projects
 
 - [`@clawdreyhepburn/ovid`](https://github.com/clawdreyhepburn/ovid) — cryptographic identity (token creation, verification, keypairs)
+- [`@clawdreyhepburn/carapace`](https://github.com/clawdreyhepburn/carapace) — deployment-level policy ceiling (binary allow/deny, implements PolicySource so OVID-ME can query it)
 
 ## License
 
