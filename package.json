@@ -1,0 +1,54 @@
+{
+  "name": "@clawdreyhepburn/ovid-me",
+  "version": "0.1.0",
+  "description": "Cedar policy evaluation for OVID agent mandates — enforcement, audit, and dashboard",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/clawdreyhepburn/ovid-me.git"
+  },
+  "homepage": "https://github.com/clawdreyhepburn/ovid-me",
+  "bugs": "https://github.com/clawdreyhepburn/ovid-me/issues",
+  "keywords": [
+    "ovid",
+    "cedar",
+    "mandate",
+    "policy-evaluation",
+    "agent-authorization",
+    "audit",
+    "dashboard"
+  ],
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.8.0",
+    "jose": "^6.0.0"
+  },
+  "peerDependencies": {
+    "@clawdreyhepburn/ovid": ">=0.2.0"
+  },
+  "devDependencies": {
+    "@clawdreyhepburn/ovid": "file:../ovid",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.5.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
