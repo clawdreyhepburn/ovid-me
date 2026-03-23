@@ -1,140 +1,113 @@
 /**
- * Full mandate evaluation engine with mode support (enforce/dry-run/shadow)
- * and subset verification.
+ * Mandate engine: wraps the evaluator with modes (enforce/dry-run/shadow)
+ * and subset proof verification.
  */
 
-import type { CedarMandate } from '@clawdreyhepburn/ovid'
-import type { OvidConfig, PolicySource } from './config.js'
-import { resolveConfig } from './config.js'
-import { AuditLogger, createAuditLogger } from './audit.js'
-import { parsePolicies, evaluatePolicies } from './evaluate.js'
-import type { EvaluateRequest, EvaluateResult } from './evaluate.js'
+import type { CedarMandate } from '@clawdreyhepburn/ovid';
+import type { OvidConfig } from './config.js';
+import type { EvaluateRequest, EvaluateResult } from './evaluate.js';
+import { evaluateMandate } from './evaluate.js';
+import { resolveConfig } from './config.js';
+import { AuditLogger } from './audit.js';
 
 export class MandateEngine {
-  private config: OvidConfig
-  private logger: AuditLogger
+  private config: OvidConfig;
+  private logger: AuditLogger;
 
   constructor(config?: Partial<OvidConfig>) {
-    this.config = resolveConfig(config)
-    this.logger = this.config.auditLog
-      ? createAuditLogger(this.config.auditLog)
-      : new AuditLogger() // no-op if no path
+    this.config = resolveConfig(config);
+    this.logger = new AuditLogger(this.config.auditLog ?? undefined);
   }
 
-  /**
-   * Main evaluation — respects enforce/dry-run/shadow modes.
-   */
   async evaluate(
     agentJti: string,
     mandate: CedarMandate,
     request: EvaluateRequest,
   ): Promise<EvaluateResult> {
-    const mode = this.config.mandateMode
-    const policyText = mandate.policySet
-    const policies = parsePolicies(policyText)
-    const result = evaluatePolicies(policies, request, mode)
+    const mode = this.config.mandateMode;
+    const cedarText = mandate.policySet;
 
-    // Log the decision
+    // Evaluate the real mandate
+    const real = evaluateMandate(cedarText, request);
+
+    let result: EvaluateResult;
+
+    switch (mode) {
+      case 'enforce':
+        result = { decision: real.decision, mode, matchedPolicy: real.matchedPolicy, reason: real.reason };
+        break;
+
+      case 'dry-run':
+        // Evaluate but always allow
+        result = {
+          decision: 'allow',
+          mode,
+          matchedPolicy: real.matchedPolicy,
+          reason: real.decision === 'deny'
+            ? `dry-run: would deny (${real.reason})`
+            : real.reason,
+        };
+        break;
+
+      case 'shadow': {
+        // Evaluate shadow mandate if configured
+        let shadowDecision: 'allow' | 'deny' | undefined;
+        if (this.config.shadowMandate) {
+          const shadow = evaluateMandate(this.config.shadowMandate.policySet, request);
+          shadowDecision = shadow.decision;
+        }
+        result = {
+          decision: real.decision,
+          mode,
+          shadowDecision,
+          matchedPolicy: real.matchedPolicy,
+          reason: real.reason,
+        };
+        break;
+      }
+    }
+
+    // Audit log every evaluation
     this.logger.logDecision(
       agentJti,
       request.action,
       request.resource,
       result.decision,
       result.matchedPolicy ? [result.matchedPolicy] : undefined,
-    )
+    );
 
-    if (mode === 'shadow') {
-      // Also evaluate shadow mandate if configured
-      let shadowDecision: 'allow' | 'deny' | undefined
-      if (this.config.shadowMandate) {
-        const shadowText = this.config.shadowMandate.policySet
-        const shadowPolicies = parsePolicies(shadowText)
-        const shadowResult = evaluatePolicies(shadowPolicies, request, 'shadow')
-        shadowDecision = shadowResult.decision
-
-        this.logger.logCustom('shadow-evaluation', {
-          agentJti,
-          action: request.action,
-          resource: request.resource,
-          realDecision: result.decision,
-          shadowDecision,
-        })
-      }
-
-      return { ...result, mode: 'shadow', shadowDecision }
-    }
-
-    if (mode === 'dry-run') {
-      // Log real decision but always allow
-      if (result.decision === 'deny') {
-        this.logger.logCustom('dry-run-would-deny', {
-          agentJti,
-          action: request.action,
-          resource: request.resource,
-          reason: result.reason,
-        })
-      }
-      return { ...result, decision: 'allow', mode: 'dry-run' }
-    }
-
-    // enforce mode — return as-is
-    return result
+    return result;
   }
 
-  /**
-   * Issuance-time check: is mandate ⊆ parent's effective policy?
-   *
-   * NOTE: Real SMT-based subset proving (e.g., via cvc5) is future work.
-   * This is a structural comparison stub that checks whether each permit
-   * in the mandate can be matched by a permit in the parent's policy.
-   */
   async verifySubset(
     mandate: CedarMandate,
     parentPrincipal: string,
   ): Promise<{ proven: boolean; reason?: string }> {
     if (this.config.subsetProof === 'off') {
-      return { proven: true }
+      return { proven: true };
     }
 
     if (!this.config.policySource) {
-      return { proven: false, reason: 'no policy source configured' }
+      return { proven: false, reason: 'no policy source configured' };
     }
 
-    const parentPolicy = await this.config.policySource.getEffectivePolicy(parentPrincipal)
-    if (parentPolicy === null) {
-      return { proven: false, reason: 'no effective policy for principal' }
+    const parentPolicy = await this.config.policySource.getEffectivePolicy(parentPrincipal);
+    if (!parentPolicy) {
+      return { proven: false, reason: `no effective policy for principal: ${parentPrincipal}` };
     }
 
-    // Basic structural comparison:
-    // For each permit in the mandate, check if the parent has a permit
-    // that covers the same (or broader) action/resource space.
-    // This is a best-effort heuristic — NOT a sound proof.
-    const mandatePolicies = parsePolicies(mandate.policySet)
-    const parentPolicies = parsePolicies(parentPolicy)
-
-    const mandatePermits = mandatePolicies.filter(p => p.effect === 'permit')
-    const parentPermits = parentPolicies.filter(p => p.effect === 'permit')
-
-    for (const mp of mandatePermits) {
-      const covered = parentPermits.some(pp => {
-        // Parent with null actions (any action) covers any mandate action
-        if (pp.actions !== null) {
-          if (mp.actions === null) return false // mandate allows anything, parent doesn't
-          if (!mp.actions.every(a => pp.actions!.includes(a))) return false
-        }
-        // Parent with null resourceGlob (any resource) covers any mandate resource
-        if (pp.resourceGlob !== null) {
-          if (mp.resourceGlob === null) return false
-          // Simple: exact match only. Real subset would need glob containment.
-          if (mp.resourceGlob !== pp.resourceGlob) return false
-        }
-        return true
-      })
-      if (!covered) {
-        return { proven: false, reason: `mandate permit not covered by parent policy: ${mp.raw}` }
-      }
+    // Basic structural comparison stub.
+    // Real SMT-based subset proof (via cvc5) is future work.
+    // For now: if the child mandate text is a substring of the parent policy,
+    // consider it proven (very conservative — only exact reuse passes).
+    const childText = mandate.policySet.trim();
+    if (parentPolicy.includes(childText)) {
+      return { proven: true };
     }
 
-    return { proven: true }
+    return {
+      proven: false,
+      reason: 'structural subset proof inconclusive (SMT prover not yet implemented)',
+    };
   }
 }
