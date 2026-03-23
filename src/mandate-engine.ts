@@ -6,9 +6,10 @@
 import type { CedarMandate } from '@clawdreyhepburn/ovid';
 import type { OvidConfig } from './config.js';
 import type { EvaluateRequest, EvaluateResult } from './evaluate.js';
-import { evaluateMandate } from './evaluate.js';
+import { evaluateMandate, evaluateMandateAsync } from './evaluate.js';
 import { resolveConfig } from './config.js';
 import { AuditLogger } from './audit.js';
+import { proveSubset, proverBinaryExists } from './subset-prover.js';
 
 export class MandateEngine {
   private config: OvidConfig;
@@ -26,9 +27,12 @@ export class MandateEngine {
   ): Promise<EvaluateResult> {
     const mode = this.config.mandateMode;
     const cedarText = mandate.policySet;
+    const engine = this.config.engine;
 
-    // Evaluate the real mandate
-    const real = evaluateMandate(cedarText, request);
+    // Evaluate the real mandate — use async WASM-aware evaluator
+    const real = engine === 'fallback'
+      ? evaluateMandate(cedarText, request)
+      : await evaluateMandateAsync(cedarText, agentJti, request, engine);
 
     let result: EvaluateResult;
 
@@ -96,18 +100,28 @@ export class MandateEngine {
       return { proven: false, reason: `no effective policy for principal: ${parentPrincipal}` };
     }
 
-    // Basic structural comparison stub.
-    // Real SMT-based subset proof (via cvc5) is future work.
-    // For now: if the child mandate text is a substring of the parent policy,
-    // consider it proven (very conservative — only exact reuse passes).
     const childText = mandate.policySet.trim();
+
+    // Try SMT prover first if binary exists
+    if (proverBinaryExists()) {
+      const proofResult = await proveSubset(parentPolicy, childText, {
+        timeoutMs: this.config.proofTimeoutMs,
+      });
+      if (proofResult.proven) {
+        return { proven: true };
+      }
+      // If prover ran but couldn't prove, fall through to structural comparison
+      // (prover might not support --parent/--child args yet)
+    }
+
+    // Structural comparison fallback: exact substring match
     if (parentPolicy.includes(childText)) {
       return { proven: true };
     }
 
     return {
       proven: false,
-      reason: 'structural subset proof inconclusive (SMT prover not yet implemented)',
+      reason: 'structural subset proof inconclusive',
     };
   }
 }

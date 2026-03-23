@@ -26,6 +26,17 @@ export interface PolicySource {
 }
 
 export interface OvidConfig {
+  // ── Engine Selection ──────────────────────────────────────────
+
+  /**
+   * Which Cedar evaluation engine to use.
+   *
+   * - "wasm"     — Cedarling WASM only (fails if unavailable)
+   * - "fallback" — String-matching engine only
+   * - "auto"     — Try WASM first, fall back to string matcher
+   */
+  engine: 'wasm' | 'fallback' | 'auto'
+
   // ── Mandate Mode ──────────────────────────────────────────────
 
   /**
@@ -122,6 +133,7 @@ export interface OvidConfig {
 
 /** Default configuration — safe, minimal, no enforcement. */
 export const DEFAULT_CONFIG: OvidConfig = {
+  engine: 'auto',
   mandateMode: 'enforce',
   subsetProof: 'off',
   proofFailure: 'deny',

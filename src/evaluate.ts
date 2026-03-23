@@ -17,6 +17,10 @@
  *   - has operator, .contains(), decimal/IP extensions
  */
 
+import { evaluateWithWasm, isWasmAvailable } from './cedar-engine-wasm.js';
+
+export type EngineMode = 'wasm' | 'fallback' | 'auto';
+
 export interface EvaluateRequest {
   action: string;
   resource: string;
@@ -104,7 +108,37 @@ function policyMatchesRequest(policy: ParsedPolicy, request: EvaluateRequest): b
 }
 
 /**
- * Evaluate a request against Cedar policy text.
+ * Evaluate a request using the WASM engine if available, otherwise fall back.
+ * This is the preferred entry point when engine mode is 'auto' or 'wasm'.
+ */
+export async function evaluateMandateAsync(
+  cedarText: string,
+  agentJti: string,
+  request: EvaluateRequest,
+  engine: EngineMode = 'auto',
+): Promise<{ decision: 'allow' | 'deny'; matchedPolicy?: string; reason?: string; engine: 'wasm' | 'fallback' }> {
+  if (engine === 'wasm' || engine === 'auto') {
+    const wasmResult = await evaluateWithWasm(cedarText, agentJti, request);
+    if (wasmResult) {
+      return {
+        decision: wasmResult.decision,
+        reason: wasmResult.reasons.join('; ') || undefined,
+        engine: 'wasm',
+      };
+    }
+    if (engine === 'wasm') {
+      // WASM explicitly requested but unavailable
+      return { decision: 'deny', reason: 'WASM engine unavailable', engine: 'fallback' };
+    }
+  }
+
+  // Fallback to string-matching engine
+  const result = evaluateMandate(cedarText, request);
+  return { ...result, engine: 'fallback' };
+}
+
+/**
+ * Evaluate a request against Cedar policy text (synchronous string-matching fallback).
  * Returns allow/deny with Cedar semantics (default-deny, forbid overrides permit).
  */
 export function evaluateMandate(

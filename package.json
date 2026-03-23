@@ -41,6 +41,9 @@
     "better-sqlite3": "^12.8.0",
     "jose": "^6.0.0"
   },
+  "optionalDependencies": {
+    "@janssenproject/cedarling_wasm": "^2.0.0"
+  },
   "peerDependencies": {
     "@clawdreyhepburn/ovid": ">=0.2.0"
   },
