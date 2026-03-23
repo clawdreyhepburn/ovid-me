@@ -113,11 +113,11 @@ describe('Dashboard Server - Seeded Data', () => {
     db = server.getDatabase();
 
     // Seed agents
-    db.recordIssuance({ jti: 'clawdrey', iss: 'system', role: 'orchestrator', parent_chain: [], iat: HOUR1, exp: HOUR1 + 86400 });
-    db.recordIssuance({ jti: 'code-reviewer', iss: 'clawdrey', role: 'code-reviewer', parent_chain: ['clawdrey'], iat: HOUR1, exp: HOUR1 + 86400 });
-    db.recordIssuance({ jti: 'browser-worker', iss: 'clawdrey', role: 'browser-worker', parent_chain: ['clawdrey'], iat: HOUR1, exp: HOUR1 + 86400 });
-    db.recordIssuance({ jti: 'deploy-agent', iss: 'clawdrey', role: 'deploy-agent', parent_chain: ['clawdrey'], iat: HOUR1, exp: HOUR1 + 86400 });
-    db.recordIssuance({ jti: 'reader', iss: 'code-reviewer', role: 'reader', parent_chain: ['clawdrey', 'code-reviewer'], iat: HOUR2, exp: HOUR2 + 86400 });
+    db.recordIssuance({ jti: 'clawdrey', iss: 'system', mandate_summary: 'orchestrator', parent_chain: [], iat: HOUR1, exp: HOUR1 + 86400 });
+    db.recordIssuance({ jti: 'code-reviewer', iss: 'clawdrey', mandate_summary: 'code-reviewer', parent_chain: ['clawdrey'], iat: HOUR1, exp: HOUR1 + 86400 });
+    db.recordIssuance({ jti: 'browser-worker', iss: 'clawdrey', mandate_summary: 'browser-worker', parent_chain: ['clawdrey'], iat: HOUR1, exp: HOUR1 + 86400 });
+    db.recordIssuance({ jti: 'deploy-agent', iss: 'clawdrey', mandate_summary: 'deploy-agent', parent_chain: ['clawdrey'], iat: HOUR1, exp: HOUR1 + 86400 });
+    db.recordIssuance({ jti: 'reader', iss: 'code-reviewer', mandate_summary: 'reader', parent_chain: ['clawdrey', 'code-reviewer'], iat: HOUR2, exp: HOUR2 + 86400 });
 
     // Seed decisions across hours, mix of types
     // Hour 1 decisions
@@ -172,7 +172,7 @@ describe('Dashboard Server - Seeded Data', () => {
     expect(body.length).toBe(5);
     const clawdrey = body.find((a: any) => a.agent_jti === 'clawdrey');
     expect(clawdrey).toBeDefined();
-    expect(clawdrey.role).toBe('orchestrator');
+    expect(clawdrey.mandate_summary).toBe('orchestrator');
     expect(clawdrey).toHaveProperty('decision_count');
     expect(clawdrey).toHaveProperty('deny_count');
   });
@@ -181,7 +181,7 @@ describe('Dashboard Server - Seeded Data', () => {
     const { body } = await get(port, '/api/agents/code-reviewer');
     expect(body.agent).toBeDefined();
     expect(body.agent.jti).toBe('code-reviewer');
-    expect(body.agent.role).toBe('code-reviewer');
+    expect(body.agent.mandate_summary).toBe('code-reviewer');
     expect(body.decisions).toBeInstanceOf(Array);
     expect(body.decisions.length).toBe(4); // read_file x2, exec, write_file
   });
@@ -242,11 +242,11 @@ describe('Dashboard Server - Seeded Data', () => {
   it('GET /api/roles returns role activity', async () => {
     const { body } = await get(port, '/api/roles');
     expect(body).toBeInstanceOf(Array);
-    const orchestrator = body.find((r: any) => r.role === 'orchestrator');
+    const orchestrator = body.find((r: any) => r.mandate_summary === 'orchestrator');
     expect(orchestrator).toBeDefined();
     expect(orchestrator.agent_count).toBe(1);
     expect(orchestrator.decision_count).toBe(5); // 4 spawns + 1 read
-    const reviewer = body.find((r: any) => r.role === 'code-reviewer');
+    const reviewer = body.find((r: any) => r.mandate_summary === 'code-reviewer');
     expect(reviewer.agent_count).toBe(1);
     expect(reviewer.decision_count).toBe(4);
     expect(reviewer.deny_count).toBe(0);
@@ -264,7 +264,7 @@ describe('Dashboard Server - Seeded Data', () => {
     expect(body).toBeInstanceOf(Array);
     expect(body.length).toBeGreaterThan(0);
     expect(body[0]).toHaveProperty('hour');
-    expect(body[0]).toHaveProperty('role');
+    expect(body[0]).toHaveProperty('mandate_summary');
     expect(body[0]).toHaveProperty('count');
   });
 
@@ -313,7 +313,7 @@ describe('Dashboard Server - Seeded Data', () => {
   it('POST /api/import imports JSONL correctly', async () => {
     const logPath = join(tmpdir(), `ovid-import-test-${Date.now()}.jsonl`);
     const lines = [
-      JSON.stringify({ ts: '2025-06-01T00:00:00Z', event: 'issuance', jti: 'imported-1', iss: 'root', role: 'tester', parent_chain: [], exp: 9999999999 }),
+      JSON.stringify({ ts: '2025-06-01T00:00:00Z', event: 'issuance', jti: 'imported-1', iss: 'root', mandate_summary: 'tester', parent_chain: [], exp: 9999999999 }),
       JSON.stringify({ ts: '2025-06-01T00:01:00Z', event: 'decision', agentJti: 'imported-1', action: 'test', resource: 'foo', decision: 'allow-proven', policies: ['p1'] }),
     ];
     writeFileSync(logPath, lines.join('\n'));
@@ -333,7 +333,7 @@ describe('Dashboard Server - Seeded Data', () => {
 
   it('handles URL-encoded JTI with slashes', async () => {
     // Register an agent with slashes in JTI
-    db.recordIssuance({ jti: 'org/team/agent-1', iss: 'clawdrey', role: 'special', parent_chain: ['clawdrey'], iat: HOUR1, exp: HOUR1 + 86400 });
+    db.recordIssuance({ jti: 'org/team/agent-1', iss: 'clawdrey', mandate_summary: 'special', parent_chain: ['clawdrey'], iat: HOUR1, exp: HOUR1 + 86400 });
     db.recordDecisionAt(HOUR1 + 50, 'org/team/agent-1', 'test', 'res', 'allow-proven', ['p1']);
     const encoded = encodeURIComponent('org/team/agent-1');
     const { body } = await get(port, `/api/agents/${encoded}`);

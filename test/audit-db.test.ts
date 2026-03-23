@@ -31,26 +31,26 @@ describe('AuditDatabase', () => {
 
   it('records and queries issuance', () => {
     db.recordIssuance({
-      jti: 'agent-1', iss: 'root', role: 'coder',
+      jti: 'agent-1', iss: 'root', mandate_summary: 'coder',
       parent_chain: [], iat: 1000, exp: 2000,
     });
     const agent = db.getAgent('agent-1') as any;
     expect(agent).toBeDefined();
     expect(agent.jti).toBe('agent-1');
-    expect(agent.role).toBe('coder');
+    expect(agent.mandate_summary).toBe('coder');
     expect(agent.depth).toBe(0);
   });
 
   it('records chain relationships', () => {
-    db.recordIssuance({ jti: 'root-1', iss: 'system', role: 'orchestrator', parent_chain: [], iat: 1000, exp: 2000 });
-    db.recordIssuance({ jti: 'child-1', iss: 'root-1', role: 'coder', parent_chain: ['root-1'], iat: 1000, exp: 2000 });
+    db.recordIssuance({ jti: 'root-1', iss: 'system', mandate_summary: 'orchestrator', parent_chain: [], iat: 1000, exp: 2000 });
+    db.recordIssuance({ jti: 'child-1', iss: 'root-1', mandate_summary: 'coder', parent_chain: ['root-1'], iat: 1000, exp: 2000 });
     const tree = db.getAgentTree('root-1') as any[];
     expect(tree.length).toBe(2);
     expect(tree.some(n => n.jti === 'child-1')).toBe(true);
   });
 
   it('records decisions and queries history', () => {
-    db.recordIssuance({ jti: 'a1', iss: 'root', role: 'coder', parent_chain: [], iat: 1000, exp: 2000 });
+    db.recordIssuance({ jti: 'a1', iss: 'root', mandate_summary: 'coder', parent_chain: [], iat: 1000, exp: 2000 });
     db.recordDecision('a1', 'read_file', '/etc/passwd', 'deny', ['policy-no-etc']);
     db.recordDecision('a1', 'use_tool', 'web_search', 'allow-proven', ['policy-tools']);
     const history = db.getAgentHistory('a1') as any[];
@@ -58,7 +58,7 @@ describe('AuditDatabase', () => {
   });
 
   it('computes decision breakdown', () => {
-    db.recordIssuance({ jti: 'a1', iss: 'root', role: 'coder', parent_chain: [], iat: 1000, exp: 2000 });
+    db.recordIssuance({ jti: 'a1', iss: 'root', mandate_summary: 'coder', parent_chain: [], iat: 1000, exp: 2000 });
     db.recordDecision('a1', 'act1', 'r1', 'deny');
     db.recordDecision('a1', 'act2', 'r2', 'allow-proven');
     db.recordDecision('a1', 'act3', 'r3', 'allow-proven');
@@ -70,7 +70,7 @@ describe('AuditDatabase', () => {
   });
 
   it('computes action breakdown', () => {
-    db.recordIssuance({ jti: 'a1', iss: 'root', role: 'coder', parent_chain: [], iat: 1000, exp: 2000 });
+    db.recordIssuance({ jti: 'a1', iss: 'root', mandate_summary: 'coder', parent_chain: [], iat: 1000, exp: 2000 });
     db.recordDecision('a1', 'read_file', 'r1', 'allow-proven');
     db.recordDecision('a1', 'read_file', 'r2', 'allow-proven');
     db.recordDecision('a1', 'exec_cmd', 'r3', 'deny');
@@ -80,7 +80,7 @@ describe('AuditDatabase', () => {
   });
 
   it('time-range filtering works', () => {
-    db.recordIssuance({ jti: 'a1', iss: 'root', role: 'coder', parent_chain: [], iat: 1000, exp: 9999999999 });
+    db.recordIssuance({ jti: 'a1', iss: 'root', mandate_summary: 'coder', parent_chain: [], iat: 1000, exp: 9999999999 });
     db.recordDecisionAt(1000, 'a1', 'act1', 'r1', 'deny');
     db.recordDecisionAt(2000, 'a1', 'act2', 'r2', 'allow-proven');
     db.recordDecisionAt(3000, 'a1', 'act3', 'r3', 'allow-proven');
@@ -91,13 +91,13 @@ describe('AuditDatabase', () => {
   });
 
   it('detects anomalies - deep chains', () => {
-    db.recordIssuance({ jti: 'deep', iss: 'root', role: 'worker', parent_chain: ['a','b','c','d'], iat: 1000, exp: 2000 });
+    db.recordIssuance({ jti: 'deep', iss: 'root', mandate_summary: 'worker', parent_chain: ['a','b','c','d'], iat: 1000, exp: 2000 });
     const anomalies = db.getAnomalies();
     expect(anomalies.deepChains.length).toBe(1);
   });
 
   it('detects anomalies - unproven decisions', () => {
-    db.recordIssuance({ jti: 'a1', iss: 'root', role: 'coder', parent_chain: [], iat: 1000, exp: 2000 });
+    db.recordIssuance({ jti: 'a1', iss: 'root', mandate_summary: 'coder', parent_chain: [], iat: 1000, exp: 2000 });
     db.recordDecision('a1', 'act1', 'r1', 'allow-unproven');
     const anomalies = db.getAnomalies();
     expect(anomalies.unproven.length).toBe(1);
@@ -106,7 +106,7 @@ describe('AuditDatabase', () => {
   it('imports JSONL', () => {
     const logPath = join(tmpdir(), `ovid-test-log-${Date.now()}.jsonl`);
     const lines = [
-      JSON.stringify({ ts: '2025-01-01T00:00:00Z', event: 'issuance', jti: 'j1', sub: 'j1', iss: 'root', role: 'coder', parent_chain: [], exp: 9999999999 }),
+      JSON.stringify({ ts: '2025-01-01T00:00:00Z', event: 'issuance', jti: 'j1', sub: 'j1', iss: 'root', mandate_summary: 'coder', parent_chain: [], exp: 9999999999 }),
       JSON.stringify({ ts: '2025-01-01T00:01:00Z', event: 'decision', agentJti: 'j1', action: 'read_file', resource: '/foo', decision: 'allow-proven', policies: ['p1'] }),
     ];
     writeFileSync(logPath, lines.join('\n'));
@@ -120,7 +120,7 @@ describe('AuditDatabase', () => {
   });
 
   it('getOverview returns correct structure', () => {
-    db.recordIssuance({ jti: 'a1', iss: 'root', role: 'coder', parent_chain: [], iat: 1000, exp: 2000 });
+    db.recordIssuance({ jti: 'a1', iss: 'root', mandate_summary: 'coder', parent_chain: [], iat: 1000, exp: 2000 });
     db.recordDecision('a1', 'act', 'res', 'allow-proven');
     db.recordDecision('a1', 'act', 'res', 'deny');
     const overview = db.getOverview() as any;
@@ -130,7 +130,7 @@ describe('AuditDatabase', () => {
   });
 
   it('policy usage tracking', () => {
-    db.recordIssuance({ jti: 'a1', iss: 'root', role: 'coder', parent_chain: [], iat: 1000, exp: 2000 });
+    db.recordIssuance({ jti: 'a1', iss: 'root', mandate_summary: 'coder', parent_chain: [], iat: 1000, exp: 2000 });
     db.recordDecision('a1', 'act', 'res', 'allow-proven', ['policy-a', 'policy-b']);
     db.recordDecision('a1', 'act', 'res', 'deny', ['policy-a']);
     const usage = db.getPolicyUsage() as any[];
@@ -139,7 +139,7 @@ describe('AuditDatabase', () => {
   });
 
   it('getSankeyData returns nodes and links', () => {
-    db.recordIssuance({ jti: 'a1', iss: 'root', role: 'coder', parent_chain: [], iat: 1000, exp: 2000 });
+    db.recordIssuance({ jti: 'a1', iss: 'root', mandate_summary: 'coder', parent_chain: [], iat: 1000, exp: 2000 });
     db.recordDecision('a1', 'read_file', '/foo', 'allow-proven');
     const sankey = db.getSankeyData() as any;
     expect(sankey.nodes.length).toBeGreaterThan(0);
@@ -147,26 +147,26 @@ describe('AuditDatabase', () => {
   });
 
   it('getRoleActivity breaks down by role', () => {
-    db.recordIssuance({ jti: 'r1', iss: 'root', role: 'code-reviewer', parent_chain: [], iat: 1000, exp: 2000 });
-    db.recordIssuance({ jti: 'r2', iss: 'root', role: 'code-reviewer', parent_chain: [], iat: 1000, exp: 2000 });
-    db.recordIssuance({ jti: 'b1', iss: 'root', role: 'browser-worker', parent_chain: [], iat: 1000, exp: 2000 });
+    db.recordIssuance({ jti: 'r1', iss: 'root', mandate_summary: 'code-reviewer', parent_chain: [], iat: 1000, exp: 2000 });
+    db.recordIssuance({ jti: 'r2', iss: 'root', mandate_summary: 'code-reviewer', parent_chain: [], iat: 1000, exp: 2000 });
+    db.recordIssuance({ jti: 'b1', iss: 'root', mandate_summary: 'browser-worker', parent_chain: [], iat: 1000, exp: 2000 });
     db.recordDecision('r1', 'read_file', '/src', 'allow-proven');
     db.recordDecision('r2', 'read_file', '/lib', 'allow-proven');
     db.recordDecision('r2', 'exec', 'git', 'deny');
     db.recordDecision('b1', 'use_tool', 'browser', 'allow-unproven');
     const roles = db.getRoleActivity() as any[];
     expect(roles.length).toBe(2);
-    const reviewer = roles.find(r => r.role === 'code-reviewer');
+    const reviewer = roles.find(r => r.mandate_summary === 'code-reviewer');
     expect(reviewer.agent_count).toBe(2);
     expect(reviewer.decision_count).toBe(3);
     expect(reviewer.deny_count).toBe(1);
-    const worker = roles.find(r => r.role === 'browser-worker');
+    const worker = roles.find(r => r.mandate_summary === 'browser-worker');
     expect(worker.agent_count).toBe(1);
     expect(worker.unproven_count).toBe(1);
   });
 
   it('getRoleActions shows actions for a specific role', () => {
-    db.recordIssuance({ jti: 'a1', iss: 'root', role: 'coder', parent_chain: [], iat: 1000, exp: 2000 });
+    db.recordIssuance({ jti: 'a1', iss: 'root', mandate_summary: 'coder', parent_chain: [], iat: 1000, exp: 2000 });
     db.recordDecision('a1', 'read_file', '/src', 'allow-proven');
     db.recordDecision('a1', 'exec', 'npm test', 'allow-proven');
     db.recordDecision('a1', 'exec', 'rm -rf', 'deny');
@@ -178,7 +178,7 @@ describe('AuditDatabase', () => {
 
   it('getTopAgents respects limit', () => {
     for (let i = 0; i < 5; i++) {
-      db.recordIssuance({ jti: `a${i}`, iss: 'root', role: 'worker', parent_chain: [], iat: 1000, exp: 2000 });
+      db.recordIssuance({ jti: `a${i}`, iss: 'root', mandate_summary: 'worker', parent_chain: [], iat: 1000, exp: 2000 });
       for (let j = 0; j <= i; j++) db.recordDecision(`a${i}`, 'act', 'res', 'allow-proven');
     }
     const top = db.getTopAgents(undefined, undefined, 3) as any[];

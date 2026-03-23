@@ -71,7 +71,7 @@ export function dashboardHtml(): string {
   .badge-proven { background: rgba(129,216,208,0.15); color: var(--tiffany); }
   .badge-unproven { background: rgba(212,188,150,0.15); color: var(--yellow); }
   .badge-deny { background: rgba(224,96,96,0.15); color: var(--red); }
-  .badge-role { background: rgba(196,168,124,0.15); color: var(--gold); }
+  .badge-mandate { background: rgba(196,168,124,0.15); color: var(--gold); }
   .anomaly-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--red); margin-right: 4px; }
 
   /* Decision stream */
@@ -107,8 +107,8 @@ export function dashboardHtml(): string {
   .donut-legend { font-size: 12px; }
   .donut-legend div { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
   .donut-legend .swatch, .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: middle; margin-right: 4px; }
-  .role-badge { background: var(--border); color: var(--gold); padding: 2px 8px; border-radius: 4px; font-size: 0.85rem; font-family: monospace; cursor: pointer; }
-  .role-badge:hover { background: var(--gold); color: var(--bg); }
+  .mandate-badge { background: var(--border); color: var(--gold); padding: 2px 8px; border-radius: 4px; font-size: 0.85rem; font-family: monospace; cursor: pointer; }
+  .mandate-badge:hover { background: var(--gold); color: var(--bg); }
   .clickable-row { cursor: pointer; } .clickable-row:hover { background: rgba(196,168,124,0.1); }
 
   /* Sankey */
@@ -189,15 +189,15 @@ export function dashboardHtml(): string {
     <button class="load-more" id="loadMore">Load More</button>
   </div>
 
-  <!-- Role Breakdown -->
+  <!-- Mandate Breakdown -->
   <div class="row row-2">
     <div class="panel" style="flex:2">
-      <h2>Role Breakdown</h2>
-      <div id="roleBreakdown"></div>
+      <h2>Mandate Breakdown</h2>
+      <div id="mandateBreakdown"></div>
     </div>
     <div class="panel" style="flex:1">
-      <h2>Role Activity Over Time</h2>
-      <div id="roleTimeline"></div>
+      <h2>Mandate Activity Over Time</h2>
+      <div id="mandateTimeline"></div>
     </div>
   </div>
 
@@ -378,7 +378,7 @@ export function dashboardHtml(): string {
     if (!agents || !agents.length) { document.getElementById('leaderboard').innerHTML = '<em style="color:var(--muted)">No agents</em>'; return; }
     const sorted = agents.sort((a, b) => (b[sortCol] - a[sortCol]) * sortDir || 0);
     let html = '<table><thead><tr>' +
-      '<th data-col="agent_jti">Agent</th><th data-col="role">Role</th><th data-col="depth">Depth</th>' +
+      '<th data-col="agent_jti">Agent</th><th data-col="role">Mandate</th><th data-col="depth">Depth</th>' +
       '<th data-col="decision_count">Decisions</th><th data-col="deny_count">Deny%</th>' +
       '<th data-col="proven_count">Proven%</th><th data-col="last_active">Last Active</th>' +
       '</tr></thead><tbody>';
@@ -386,7 +386,7 @@ export function dashboardHtml(): string {
       const total = a.decision_count || 1;
       html += '<tr style="cursor:pointer" onclick="showAgent(&quot;' + encodeURIComponent(a.agent_jti||'') + '&quot;)">' +
         '<td class="truncate" style="font-family:monospace">' + fmtId(a.agent_jti) + '</td>' +
-        '<td><span class="badge badge-role">' + (a.role||'?') + '</span></td>' +
+        '<td><span class="badge badge-mandate">' + (a.mandate_summary||'?') + '</span></td>' +
         '<td>' + (a.depth ?? '?') + '</td><td>' + a.decision_count + '</td>' +
         '<td>' + pct(a.deny_count, total) + '</td><td>' + pct(a.proven_count, total) + '</td>' +
         '<td style="font-size:11px;color:var(--muted)">' + (a.last_active ? fmtTime(a.last_active) : '-') + '</td></tr>';
@@ -416,7 +416,7 @@ export function dashboardHtml(): string {
     for (const d of streamData) {
       html += '<div class="stream-entry">' +
         '<span class="ts">' + fmtTime(d.timestamp) + '</span>' +
-        '<span class="badge badge-role">' + (d.role||'?') + '</span>' +
+        '<span class="badge badge-mandate">' + (d.mandate_summary||'?') + '</span>' +
         '<span class="action-text">' + (d.action||'') + '</span>' +
         '<span class="resource-text" title="' + (d.resource||'').replace(/"/g,'&quot;') + '">' + fmtId(d.resource||'') + '</span>' +
         decBadge(d.decision) + '</div>';
@@ -611,7 +611,7 @@ export function dashboardHtml(): string {
         html += '<div class="tree-node" style="--depth:' + d + '" onclick="showAgent(&quot;' + encodeURIComponent(node.jti||'') + '&quot;)">' +
           '<span class="tree-toggle">' + (d > 0 ? '└' : '●') + '</span>' +
           '<span class="tree-id">' + fmtId(node.jti) + '</span>' +
-          (node.role ? '<span class="badge badge-role">' + node.role + '</span>' : '') +
+          (node.mandate_summary ? '<span class="badge badge-mandate">' + node.mandate_summary + '</span>' : '') +
           '<span class="tree-count">' + (node.decision_count || 0) + ' decisions</span></div>';
       }
     }
@@ -620,18 +620,18 @@ export function dashboardHtml(): string {
 
   function debounce(fn, ms) { let t; return function() { clearTimeout(t); t = setTimeout(fn, ms); }; }
 
-  // Role Breakdown
-  async function loadRoles() {
-    const data = await api('roles');
-    const el = document.getElementById('roleBreakdown');
-    if (!data || !data.length) { el.innerHTML = '<em style="color:var(--muted)">No role data</em>'; return; }
-    let html = '<table class="leader-table"><thead><tr><th>Role</th><th>Agents</th><th>Decisions</th><th>Proven</th><th>Unproven</th><th>Denied</th><th>Deny %</th></tr></thead><tbody>';
+  // Mandate Breakdown
+  async function loadMandates() {
+    const data = await api('mandates');
+    const el = document.getElementById('mandateBreakdown');
+    if (!data || !data.length) { el.innerHTML = '<em style="color:var(--muted)">No mandate data</em>'; return; }
+    let html = '<table class="leader-table"><thead><tr><th>Mandate</th><th>Agents</th><th>Decisions</th><th>Proven</th><th>Unproven</th><th>Denied</th><th>Deny %</th></tr></thead><tbody>';
     for (const r of data) {
       const total = r.decision_count || 1;
       const denyPct = ((r.deny_count / total) * 100).toFixed(1);
       const denyColor = r.deny_count > 0 ? 'var(--red)' : 'var(--muted)';
-      html += '<tr class="clickable-row" onclick="showRoleDetail(&quot;' + encodeURIComponent(r.role) + '&quot;)">' +
-        '<td><span class="role-badge">' + (r.role || 'unknown') + '</span></td>' +
+      html += '<tr class="clickable-row" onclick="showMandateDetail(&quot;' + encodeURIComponent(r.mandate_summary) + '&quot;)">' +
+        '<td><span class="mandate-badge">' + (r.mandate_summary || 'unknown') + '</span></td>' +
         '<td>' + r.agent_count + '</td>' +
         '<td>' + r.decision_count + '</td>' +
         '<td style="color:var(--tiffany)">' + (r.proven_count || 0) + '</td>' +
@@ -643,17 +643,17 @@ export function dashboardHtml(): string {
     el.innerHTML = html;
   }
 
-  // Role Activity Over Time
-  async function loadRoleTimeline() {
-    const data = await api('roles/timeline');
-    const el = document.getElementById('roleTimeline');
+  // Mandate Activity Over Time
+  async function loadMandateTimeline() {
+    const data = await api('mandates/timeline');
+    const el = document.getElementById('mandateTimeline');
     if (!data || !data.length) { el.innerHTML = '<em style="color:var(--muted)">No data</em>'; return; }
     // Group by role, plot stacked bars per hour
-    const roles = [...new Set(data.map(d => d.role || 'unknown'))];
+    const roles = [...new Set(data.map(d => d.mandate_summary || 'unknown'))];
     const hours = [...new Set(data.map(d => d.hour))].sort((a,b) => a - b);
     const roleColors = ['#81d8d0','#c4a87c','#e06060','#d4bc96','#60a0e0','#b090d0','#60c080','#e0a060'];
     const byHourRole = new Map();
-    data.forEach(d => byHourRole.set(d.hour + ':' + (d.role||'unknown'), d.count));
+    data.forEach(d => byHourRole.set(d.hour + ':' + (d.mandate_summary||'unknown'), d.count));
     const maxPerHour = hours.map(h => roles.reduce((s, r) => s + (byHourRole.get(h+':'+r) || 0), 0));
     const maxVal = Math.max(...maxPerHour, 1);
     const W = 400, H = 200, pad = 40;
@@ -684,9 +684,9 @@ export function dashboardHtml(): string {
   }
 
   // Role detail modal
-  window.showRoleDetail = async function(encodedRole) {
+  window.showMandateDetail = async function(encodedRole) {
     const role = decodeURIComponent(encodedRole);
-    const data = await api('roles/' + encodedRole);
+    const data = await api('mandates/' + encodedRole);
     if (!data) return;
     const modal = document.getElementById('agentModal');
     document.getElementById('modalTitle').textContent = 'Role: ' + role;
@@ -701,7 +701,7 @@ export function dashboardHtml(): string {
   };
 
   async function refreshAll() {
-    await Promise.all([loadOverview(), loadTimeline(), loadLeaderboard(), loadStream(false), loadPolicies(), loadActions(), loadSankey(), loadActionOptions(), loadTree(), loadRoles(), loadRoleTimeline()]);
+    await Promise.all([loadOverview(), loadTimeline(), loadLeaderboard(), loadStream(false), loadPolicies(), loadActions(), loadSankey(), loadActionOptions(), loadTree(), loadMandates(), loadMandateTimeline()]);
   }
 
   // Initial load (default: last hour)

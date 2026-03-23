@@ -15,13 +15,14 @@ export class AuditDatabase {
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
     this.createTables();
+    this.migrate();
   }
 
   private createTables(): void {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS ovids (
         jti TEXT PRIMARY KEY,
-        role TEXT,
+        mandate_summary TEXT,
         issuer TEXT,
         parent_chain TEXT DEFAULT '[]',
         issued_at INTEGER,
@@ -50,15 +51,25 @@ export class AuditDatabase {
     `);
   }
 
+  private migrate(): void {
+    // Migration: rename `role` column to `mandate_summary` if DB was created with old schema
+    const columns = this.db.prepare(`PRAGMA table_info(ovids)`).all() as { name: string }[];
+    const hasRole = columns.some(c => c.name === 'role');
+    const hasMandate = columns.some(c => c.name === 'mandate_summary');
+    if (hasRole && !hasMandate) {
+      this.db.exec(`ALTER TABLE ovids RENAME COLUMN role TO mandate_summary`);
+    }
+  }
+
   recordIssuance(claims: {
-    jti: string; iss: string; role: string; parent_chain: string[];
+    jti: string; iss: string; mandate_summary: string; parent_chain: string[];
     iat: number; exp: number; raw_jwt?: string;
   }): void {
     const depth = claims.parent_chain.length;
     this.db.prepare(`
-      INSERT OR REPLACE INTO ovids (jti, role, issuer, parent_chain, issued_at, expires_at, raw_jwt, depth)
+      INSERT OR REPLACE INTO ovids (jti, mandate_summary, issuer, parent_chain, issued_at, expires_at, raw_jwt, depth)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(claims.jti, claims.role, claims.iss, JSON.stringify(claims.parent_chain),
+    `).run(claims.jti, claims.mandate_summary, claims.iss, JSON.stringify(claims.parent_chain),
       claims.iat, claims.exp, claims.raw_jwt ?? '', depth);
 
     // Insert chain relationships
@@ -87,7 +98,7 @@ export class AuditDatabase {
   importJsonl(logPath: string): { imported: number } {
     const lines = readFileSync(logPath, 'utf-8').trim().split('\n').filter(l => l.length > 0);
     let imported = 0;
-    const insertOvid = this.db.prepare(`INSERT OR IGNORE INTO ovids (jti, role, issuer, parent_chain, issued_at, expires_at, raw_jwt, depth) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+    const insertOvid = this.db.prepare(`INSERT OR IGNORE INTO ovids (jti, mandate_summary, issuer, parent_chain, issued_at, expires_at, raw_jwt, depth) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
     const insertChain = this.db.prepare(`INSERT OR IGNORE INTO chains (parent_jti, child_jti) VALUES (?, ?)`);
     const insertDecision = this.db.prepare(`INSERT INTO decisions (timestamp, agent_jti, action, resource, decision, determining_policies) VALUES (?, ?, ?, ?, ?, ?)`);
 
@@ -96,7 +107,7 @@ export class AuditDatabase {
         const entry = JSON.parse(line);
         if (entry.event === 'issuance') {
           const chain: string[] = entry.parent_chain ?? [];
-          insertOvid.run(entry.jti ?? entry.sub, entry.role ?? '', entry.iss ?? '',
+          insertOvid.run(entry.jti ?? entry.sub, entry.mandate_summary ?? entry.role ?? '', entry.iss ?? '',
             JSON.stringify(chain), Math.floor(new Date(entry.ts).getTime() / 1000),
             entry.exp ?? 0, '', chain.length);
           if (chain.length > 0) {
@@ -132,14 +143,13 @@ export class AuditDatabase {
   }
 
   getAgentTree(rootJti: string): unknown[] {
-    // Recursive CTE to get full tree
     return this.db.prepare(`
       WITH RECURSIVE tree(jti, depth) AS (
         SELECT ?, 0
         UNION ALL
         SELECT c.child_jti, tree.depth + 1 FROM chains c JOIN tree ON c.parent_jti = tree.jti
       )
-      SELECT t.jti, t.depth, o.role, o.issuer, o.issued_at, o.expires_at,
+      SELECT t.jti, t.depth, o.mandate_summary, o.issuer, o.issued_at, o.expires_at,
         (SELECT COUNT(*) FROM decisions d WHERE d.agent_jti = t.jti) as decision_count
       FROM tree t LEFT JOIN ovids o ON t.jti = o.jti
     `).all(rootJti);
@@ -148,7 +158,7 @@ export class AuditDatabase {
   getActiveAgents(from?: number, to?: number): unknown[] {
     const tw = this.timeWhere(from, to);
     return this.db.prepare(`
-      SELECT d.agent_jti, o.role, o.depth, COUNT(*) as decision_count,
+      SELECT d.agent_jti, o.mandate_summary, o.depth, COUNT(*) as decision_count,
         MAX(d.timestamp) as last_active,
         SUM(CASE WHEN d.decision = 'deny' THEN 1 ELSE 0 END) as deny_count,
         SUM(CASE WHEN d.decision = 'allow-proven' THEN 1 ELSE 0 END) as proven_count,
@@ -174,7 +184,7 @@ export class AuditDatabase {
   getTopAgents(from?: number, to?: number, limit = 20): unknown[] {
     const tw = this.timeWhere(from, to);
     return this.db.prepare(`
-      SELECT d.agent_jti, o.role, o.depth, COUNT(*) as decision_count, MAX(d.timestamp) as last_active
+      SELECT d.agent_jti, o.mandate_summary, o.depth, COUNT(*) as decision_count, MAX(d.timestamp) as last_active
       FROM decisions d LEFT JOIN ovids o ON d.agent_jti = o.jti
       WHERE 1=1${tw.clause}
       GROUP BY d.agent_jti ORDER BY decision_count DESC LIMIT ?
@@ -238,7 +248,6 @@ export class AuditDatabase {
       SELECT * FROM ovids WHERE depth > 3${twIssued.clause}
     `).all(...twIssued.params);
 
-    // Rapid spawning: more than 10 per minute window
     const rapidSpawning = this.db.prepare(`
       SELECT (issued_at / 60) * 60 as minute, COUNT(*) as count
       FROM ovids WHERE issued_at > 0${twIssued.clause}
@@ -248,20 +257,20 @@ export class AuditDatabase {
     return { unproven, deepChains, rapidSpawning };
   }
 
-  getRoleBreakdown(from?: number, to?: number): unknown[] {
+  getMandateBreakdown(from?: number, to?: number): unknown[] {
     const tw = this.timeWhere(from, to);
     return this.db.prepare(`
-      SELECT o.role, d.decision, COUNT(*) as count
+      SELECT o.mandate_summary, d.decision, COUNT(*) as count
       FROM decisions d LEFT JOIN ovids o ON d.agent_jti = o.jti
       WHERE 1=1${tw.clause}
-      GROUP BY o.role, d.decision ORDER BY count DESC
+      GROUP BY o.mandate_summary, d.decision ORDER BY count DESC
     `).all(...tw.params);
   }
 
-  getRoleActivity(from?: number, to?: number): unknown[] {
+  getMandateActivity(from?: number, to?: number): unknown[] {
     const tw = this.timeWhere(from, to);
     return this.db.prepare(`
-      SELECT o.role,
+      SELECT o.mandate_summary,
         COUNT(DISTINCT d.agent_jti) as agent_count,
         COUNT(*) as decision_count,
         SUM(CASE WHEN d.decision = 'deny' THEN 1 ELSE 0 END) as deny_count,
@@ -271,29 +280,35 @@ export class AuditDatabase {
         MAX(d.timestamp) as last_seen
       FROM decisions d LEFT JOIN ovids o ON d.agent_jti = o.jti
       WHERE 1=1${tw.clause}
-      GROUP BY o.role ORDER BY decision_count DESC
+      GROUP BY o.mandate_summary ORDER BY decision_count DESC
     `).all(...tw.params);
   }
 
-  getRoleTimeline(from?: number, to?: number): unknown[] {
+  getMandateTimeline(from?: number, to?: number): unknown[] {
     const tw = this.timeWhere(from, to);
     return this.db.prepare(`
-      SELECT (d.timestamp / 3600) * 3600 as hour, o.role, COUNT(*) as count
+      SELECT (d.timestamp / 3600) * 3600 as hour, o.mandate_summary, COUNT(*) as count
       FROM decisions d LEFT JOIN ovids o ON d.agent_jti = o.jti
       WHERE 1=1${tw.clause}
-      GROUP BY hour, o.role ORDER BY hour
+      GROUP BY hour, o.mandate_summary ORDER BY hour
     `).all(...tw.params);
   }
 
-  getRoleActions(role: string, from?: number, to?: number): unknown[] {
+  getMandateActions(mandate: string, from?: number, to?: number): unknown[] {
     const tw = this.timeWhere(from, to);
     return this.db.prepare(`
       SELECT d.action, d.decision, COUNT(*) as count
       FROM decisions d LEFT JOIN ovids o ON d.agent_jti = o.jti
-      WHERE o.role = ?${tw.clause}
+      WHERE o.mandate_summary = ?${tw.clause}
       GROUP BY d.action, d.decision ORDER BY count DESC
-    `).all(role, ...tw.params);
+    `).all(mandate, ...tw.params);
   }
+
+  // Deprecated aliases
+  getRoleBreakdown(from?: number, to?: number): unknown[] { return this.getMandateBreakdown(from, to); }
+  getRoleActivity(from?: number, to?: number): unknown[] { return this.getMandateActivity(from, to); }
+  getRoleTimeline(from?: number, to?: number): unknown[] { return this.getMandateTimeline(from, to); }
+  getRoleActions(role: string, from?: number, to?: number): unknown[] { return this.getMandateActions(role, from, to); }
 
   getDecisionsByDepth(from?: number, to?: number): unknown[] {
     const tw = this.timeWhere(from, to);
@@ -316,7 +331,7 @@ export class AuditDatabase {
     if (opts.from != null) { parts.push('d.timestamp >= ?'); params.push(opts.from); }
     if (opts.to != null) { parts.push('d.timestamp <= ?'); params.push(opts.to); }
     return this.db.prepare(`
-      SELECT d.*, o.role FROM decisions d LEFT JOIN ovids o ON d.agent_jti = o.jti
+      SELECT d.*, o.mandate_summary FROM decisions d LEFT JOIN ovids o ON d.agent_jti = o.jti
       WHERE ${parts.join(' AND ')} ORDER BY d.timestamp DESC LIMIT ? OFFSET ?
     `).all(...params, limit, (page - 1) * limit);
   }
@@ -327,7 +342,6 @@ export class AuditDatabase {
 
   getOverview(from?: number, to?: number): unknown {
     const tw = this.timeWhere(from, to);
-    const twIssued = this.timeWhere(from, to, 'issued_at');
     const totalAgents = (this.db.prepare(`SELECT COUNT(DISTINCT agent_jti) as c FROM decisions WHERE 1=1${tw.clause}`).get(...tw.params) as any)?.c ?? 0;
     const breakdown = this.getDecisionBreakdown(from, to) as { decision: string; count: number }[];
     const total = breakdown.reduce((s, r) => s + r.count, 0);
@@ -339,7 +353,7 @@ export class AuditDatabase {
   getSankeyData(from?: number, to?: number): unknown {
     const tw = this.timeWhere(from, to);
     const rows = this.db.prepare(`
-      SELECT d.agent_jti, o.issuer, o.role, d.action, d.decision, COUNT(*) as count
+      SELECT d.agent_jti, o.issuer, o.mandate_summary, d.action, d.decision, COUNT(*) as count
       FROM decisions d LEFT JOIN ovids o ON d.agent_jti = o.jti
       WHERE 1=1${tw.clause}
       GROUP BY d.agent_jti, d.action, d.decision

@@ -12,7 +12,7 @@ describe('Load Tests', () => {
   let db: AuditDatabase;
   let dbPath: string;
 
-  const ROLES = ['orchestrator', 'code-reviewer', 'browser-worker', 'deploy-agent', 'reader', 'writer', 'tester', 'monitor', 'scheduler', 'auditor'];
+  const MANDATES = ['orchestrator', 'code-reviewer', 'browser-worker', 'deploy-agent', 'reader', 'writer', 'tester', 'monitor', 'scheduler', 'auditor'];
   const ACTIONS = ['read_file', 'write_file', 'exec', 'use_tool', 'navigate', 'spawn_agent', 'delete', 'deploy'];
   const DECISIONS = ['allow-proven', 'allow-unproven', 'deny'];
   const POLICIES = ['policy-read', 'policy-write', 'policy-exec', 'policy-safety', 'policy-deploy'];
@@ -26,11 +26,11 @@ describe('Load Tests', () => {
 
     // Insert 100 agents across 10 roles
     for (let i = 0; i < NUM_AGENTS; i++) {
-      const role = ROLES[i % ROLES.length];
+      const mandate_summary = MANDATES[i % MANDATES.length];
       const parentChain = i < 10 ? [] : [`agent-${i % 10}`];
       db.recordIssuance({
         jti: `agent-${i}`, iss: i < 10 ? 'system' : `agent-${i % 10}`,
-        role, parent_chain: parentChain,
+        mandate_summary, parent_chain: parentChain,
         iat: BASE_TS + i * 60, exp: BASE_TS + 86400,
       });
     }
@@ -53,13 +53,13 @@ describe('Load Tests', () => {
     try { unlinkSync(dbPath + '-shm'); } catch {}
   });
 
-  it('getRoleActivity completes in < 100ms', () => {
+  it('getMandateActivity completes in < 100ms', () => {
     const start = performance.now();
-    const result = db.getRoleActivity() as any[];
+    const result = db.getMandateActivity() as any[];
     const elapsed = performance.now() - start;
-    expect(result.length).toBe(ROLES.length);
+    expect(result.length).toBe(MANDATES.length);
     expect(elapsed).toBeLessThan(100);
-    console.log(`getRoleActivity: ${elapsed.toFixed(1)}ms, ${result.length} roles`);
+    console.log(`getMandateActivity: ${elapsed.toFixed(1)}ms, ${result.length} roles`);
   });
 
   it('getHourlyActivity completes in < 100ms', () => {

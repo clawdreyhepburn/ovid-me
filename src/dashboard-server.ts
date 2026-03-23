@@ -93,15 +93,25 @@ export class DashboardServer {
         data = this.db.getSankeyData(from, to);
       } else if (route === 'depth') {
         data = this.db.getDecisionsByDepth(from, to);
+      } else if (route === 'mandates') {
+        data = this.db.getMandateActivity(from, to);
+      } else if (route === 'mandates/breakdown') {
+        data = this.db.getMandateBreakdown(from, to);
+      } else if (route === 'mandates/timeline') {
+        data = this.db.getMandateTimeline(from, to);
+      } else if (route.startsWith('mandates/') && !route.slice(9).includes('/')) {
+        const mandate = decodeURIComponent(route.slice(9));
+        data = this.db.getMandateActions(mandate, from, to);
+      // Deprecated aliases — /api/roles/* → /api/mandates/*
       } else if (route === 'roles') {
-        data = this.db.getRoleActivity(from, to);
+        data = this.db.getMandateActivity(from, to);
       } else if (route === 'roles/breakdown') {
-        data = this.db.getRoleBreakdown(from, to);
+        data = this.db.getMandateBreakdown(from, to);
       } else if (route === 'roles/timeline') {
-        data = this.db.getRoleTimeline(from, to);
+        data = this.db.getMandateTimeline(from, to);
       } else if (route.startsWith('roles/') && !route.slice(6).includes('/')) {
         const role = decodeURIComponent(route.slice(6));
-        data = this.db.getRoleActions(role, from, to);
+        data = this.db.getMandateActions(role, from, to);
       } else if (route === 'import' && req.method === 'POST') {
         // Simple: read body as path to JSONL file
         let body = '';
