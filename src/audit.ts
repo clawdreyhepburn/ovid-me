@@ -35,8 +35,8 @@ export class AuditLogger {
       iss: claims.iss,
       sub: claims.sub,
       role: 'mandate',
-      mandate: claims.mandate ? 'present' : 'absent',
-      parent_chain: claims.parent_chain,
+      mandate: claims.authorization_details?.length ? 'present' : 'absent',
+      parent_chain: claims.authorization_details?.[0]?.parent_chain ?? [],
       exp: claims.exp,
     });
   }

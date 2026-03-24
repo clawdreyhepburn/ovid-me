@@ -1,5 +1,5 @@
-// Re-export CedarMandate for convenience
-export type { CedarMandate } from '@clawdreyhepburn/ovid';
+// Re-export types for convenience
+export type { AuthorizationDetail, CedarMandate } from '@clawdreyhepburn/ovid';
 
 export { AuditLogger, createAuditLogger, defaultAuditLogger } from './audit.js';
 export type { DecisionOutcome, AuditEntry } from './audit.js';

@@ -219,9 +219,10 @@ describe('Integration: OVID + OVID-ME + Carapace', () => {
       },
     });
 
-    // Verify parent chain
-    expect(childToken.claims.parent_chain.length).toBe(1);
-    expect(childToken.claims.parent_chain[0]).toBe(rootToken.claims.sub);
+    // Verify parent chain (now inside authorization_details)
+    const childDetail = childToken.claims.authorization_details[0];
+    expect(childDetail.parent_chain!.length).toBe(1);
+    expect(childDetail.parent_chain![0]).toBe(rootToken.claims.sub);
     expect(childToken.claims.parent_ovid).toBe(rootToken.claims.jti);
 
     // Verify child token with root's public key (signed by root's agent keys)

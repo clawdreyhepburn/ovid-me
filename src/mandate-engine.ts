@@ -3,7 +3,14 @@
  * and subset proof verification.
  */
 
-import type { CedarMandate } from '@clawdreyhepburn/ovid';
+import type { AuthorizationDetail, OvidClaims } from '@clawdreyhepburn/ovid';
+type CedarMandate = AuthorizationDetail;
+
+/** Extract the first agent_mandate entry from an OvidClaims token */
+export function extractMandate(claims: OvidClaims): AuthorizationDetail {
+  const detail = claims.authorization_details?.find(d => d.type === 'agent_mandate');
+  return detail ?? claims.authorization_details?.[0] ?? { type: 'agent_mandate', rarFormat: 'cedar' as const, policySet: '' };
+}
 import type { OvidConfig } from './config.js';
 import type { EvaluateRequest, EvaluateResult } from './evaluate.js';
 import { evaluateMandate, evaluateMandateAsync } from './evaluate.js';

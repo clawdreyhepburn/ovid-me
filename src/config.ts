@@ -5,9 +5,11 @@
  * See docs/CONFIG.md for detailed documentation and deployment profiles.
  */
 
-// Re-export CedarMandate from ovid for convenience
-export type { CedarMandate } from '@clawdreyhepburn/ovid'
-import type { CedarMandate } from '@clawdreyhepburn/ovid'
+// Re-export types from ovid for convenience
+export type { AuthorizationDetail, CedarMandate } from '@clawdreyhepburn/ovid'
+import type { AuthorizationDetail } from '@clawdreyhepburn/ovid'
+/** @deprecated Use AuthorizationDetail */
+type CedarMandate = AuthorizationDetail;
 
 /**
  * Interface for retrieving a principal's effective policy from the
