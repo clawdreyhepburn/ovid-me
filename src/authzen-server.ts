@@ -9,6 +9,7 @@
  * Spec: https://openid.github.io/authzen/
  */
 
+import crypto from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import type { OvidConfig } from './config.js';
 import type { AuthorizationDetail } from '@clawdreyhepburn/ovid';
@@ -21,6 +22,7 @@ import {
   type AuthZenResponse,
   type AuthZenBatchRequest,
   type AuthZenBatchResponse,
+  type AuthZenBatchOptions,
 } from './authzen.js';
 
 export interface AuthZenServerConfig {
@@ -34,6 +36,7 @@ export class AuthZenServer {
   private engine: MandateEngine;
   private defaultPolicy?: string;
   private port: number;
+  private issuer: string = '';
 
   constructor(config?: AuthZenServerConfig) {
     this.engine = new MandateEngine(config?.ovidConfig);
@@ -48,7 +51,8 @@ export class AuthZenServer {
       this.server!.listen(p, () => {
         const addr = this.server!.address();
         const actualPort = typeof addr === 'object' && addr ? addr.port : p;
-        console.log(`OVID AuthZEN PDP: http://localhost:${actualPort}`);
+        this.issuer = `http://localhost:${actualPort}`;
+        console.log(`OVID AuthZEN PDP: ${this.issuer}`);
         resolve();
       });
     });
@@ -66,9 +70,13 @@ export class AuthZenServer {
     const url = new URL(req.url || '/', `http://localhost`);
     const path = url.pathname;
 
+    // Request ID (Section 10.1.3)
+    const requestId = req.headers['x-request-id'] as string || crypto.randomUUID();
+    res.setHeader('X-Request-ID', requestId);
+
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Request-ID');
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
@@ -109,6 +117,24 @@ export class AuthZenServer {
       return;
     }
 
+    if (path === '/.well-known/authzen-configuration' && req.method === 'GET') {
+      this.json(res, 200, {
+        issuer: this.issuer,
+        evaluation_endpoint: '/access/v1/evaluation',
+        evaluations_endpoint: '/access/v1/evaluations',
+        capabilities: {
+          evaluations_supported: true,
+          evaluations_semantics_supported: [
+            'execute_all',
+            'deny_on_first_deny',
+            'permit_on_first_permit',
+          ],
+          search_supported: false,
+        },
+      });
+      return;
+    }
+
     res.writeHead(404);
     res.end(JSON.stringify({ error: 'Not found' }));
   }
@@ -142,26 +168,66 @@ export class AuthZenServer {
     }
 
     const batch = body as AuthZenBatchRequest;
+    const defaults = {
+      subject: batch.subject,
+      action: batch.action,
+      resource: batch.resource,
+      context: batch.context,
+    };
+    const semantic = batch.options?.evaluations_semantic ?? 'execute_all';
     const results: AuthZenResponse[] = [];
 
-    for (const req of batch.evaluations) {
-      if (!validateAuthZenRequest(req)) {
-        results.push({ decision: false, context: { reason_admin: { en: 'Invalid request format' } } });
+    for (const evalEntry of batch.evaluations) {
+      // Merge with defaults (Section 7.1.1)
+      const merged = {
+        subject: evalEntry.subject ?? defaults.subject,
+        action: evalEntry.action ?? defaults.action,
+        resource: evalEntry.resource ?? defaults.resource,
+        context: evalEntry.context ?? defaults.context,
+      };
+
+      if (!validateAuthZenRequest(merged)) {
+        const result: AuthZenResponse = { decision: false, context: { reason_admin: { en: 'Invalid request format' } } };
+        results.push(result);
+        if (semantic === 'deny_on_first_deny') {
+          (result.context as any).reason = 'deny_on_first_deny';
+          break;
+        }
         continue;
       }
 
       try {
-        const mandate = this.resolveMandate(req);
+        const mandate = this.resolveMandate(merged as AuthZenRequest);
         if (!mandate) {
-          results.push({ decision: false, context: { reason_admin: { en: 'No mandate available' } } });
+          const result: AuthZenResponse = { decision: false, context: { reason_admin: { en: 'No mandate available' } } };
+          results.push(result);
+          if (semantic === 'deny_on_first_deny') {
+            (result.context as any).reason = 'deny_on_first_deny';
+            break;
+          }
           continue;
         }
 
-        const { agentJti, request } = authzenToEvaluateRequest(req);
-        const result = await this.engine.evaluate(agentJti, mandate, request);
-        results.push(evaluateResultToAuthzen(result));
+        const { agentJti, request } = authzenToEvaluateRequest(merged as AuthZenRequest);
+        const evalResult = await this.engine.evaluate(agentJti, mandate, request);
+        const response = evaluateResultToAuthzen(evalResult);
+        results.push(response);
+
+        // Evaluation semantics (Section 7.1.2)
+        if (semantic === 'deny_on_first_deny' && !response.decision) {
+          response.context = { ...response.context, reason: 'deny_on_first_deny' } as any;
+          break;
+        }
+        if (semantic === 'permit_on_first_permit' && response.decision) {
+          break;
+        }
       } catch (e: any) {
-        results.push({ decision: false, context: { reason_admin: { en: `Error: ${e.message}` } } });
+        const result: AuthZenResponse = { decision: false, context: { reason_admin: { en: `Error: ${e.message}` } } };
+        results.push(result);
+        if (semantic === 'deny_on_first_deny') {
+          (result.context as any).reason = 'deny_on_first_deny';
+          break;
+        }
       }
     }
 

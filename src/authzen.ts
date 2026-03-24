@@ -43,8 +43,17 @@ export interface AuthZenResponse {
   };
 }
 
+export interface AuthZenBatchOptions {
+  evaluations_semantic?: 'execute_all' | 'deny_on_first_deny' | 'permit_on_first_permit';
+}
+
 export interface AuthZenBatchRequest {
-  evaluations: AuthZenRequest[];
+  subject?: AuthZenSubject;
+  action?: AuthZenAction;
+  resource?: AuthZenResource;
+  context?: Record<string, unknown>;
+  evaluations: Partial<AuthZenRequest>[];
+  options?: AuthZenBatchOptions;
 }
 
 export interface AuthZenBatchResponse {

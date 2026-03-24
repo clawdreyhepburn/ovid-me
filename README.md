@@ -109,6 +109,20 @@ curl -X POST http://localhost:19832/access/v1/evaluations \
   }'
 ```
 
+### Spec Compliance
+
+OVID-ME implements the AuthZEN Authorization API 1.0 with the following coverage:
+
+| Feature | Status |
+|---------|--------|
+| Access Evaluation API (Section 6) | ✅ Full |
+| Access Evaluations API (Section 7) | ✅ Full (defaults, semantics) |
+| PDP Metadata (Section 9) | ✅ Full |
+| Request Identification | ✅ Full |
+| Search APIs (Section 8) | ❌ Not implemented |
+
+Search APIs (`/access/v1/search/subjects`, `/search/resources`, `/search/actions`) require reverse policy analysis ("who can access X?") which is non-trivial with Cedar's forward-evaluation model. Contributions welcome.
+
 ### Mandate sources
 
 The server resolves mandates in priority order:

@@ -198,6 +198,138 @@ describe('AuthZEN Server - Permit Policy', () => {
   });
 });
 
+describe('AuthZEN Server - Batch Defaults & Semantics', () => {
+  let server: AuthZenServer;
+  let port: number;
+
+  beforeAll(async () => {
+    server = new AuthZenServer({
+      port: 0,
+      defaultPolicy: 'permit(principal, action == Ovid::Action::"read_file", resource);',
+      ovidConfig: { mandateMode: 'enforce', engine: 'fallback' },
+    });
+    await server.start();
+    port = (server as any).server.address().port;
+  });
+
+  afterAll(async () => { await server.stop(); });
+
+  it('batch with top-level defaults: evaluations inherit subject', async () => {
+    const { status, body } = await post(port, '/access/v1/evaluations', {
+      subject: { type: 'agent', id: 'default-agent' },
+      evaluations: [
+        { action: { name: 'read_file' }, resource: { type: 'file', id: '/a' } },
+        { action: { name: 'read_file' }, resource: { type: 'file', id: '/b' } },
+      ],
+    });
+    expect(status).toBe(200);
+    expect(body.evaluations).toHaveLength(2);
+    expect(body.evaluations[0].decision).toBe(true);
+    expect(body.evaluations[1].decision).toBe(true);
+  });
+
+  it('batch default override: evaluation-level subject wins', async () => {
+    const { status, body } = await post(port, '/access/v1/evaluations', {
+      subject: { type: 'agent', id: 'default-agent' },
+      evaluations: [
+        { action: { name: 'read_file' }, resource: { type: 'file', id: '/a' } },
+        { subject: { type: 'agent', id: 'override-agent' }, action: { name: 'read_file' }, resource: { type: 'file', id: '/b' } },
+      ],
+    });
+    expect(status).toBe(200);
+    expect(body.evaluations).toHaveLength(2);
+    expect(body.evaluations[0].decision).toBe(true);
+    expect(body.evaluations[1].decision).toBe(true);
+  });
+
+  it('deny_on_first_deny: stops on first deny', async () => {
+    const { status, body } = await post(port, '/access/v1/evaluations', {
+      subject: { type: 'agent', id: 'a1' },
+      options: { evaluations_semantic: 'deny_on_first_deny' },
+      evaluations: [
+        { action: { name: 'read_file' }, resource: { type: 'file', id: '/a' } },
+        { action: { name: 'exec' }, resource: { type: 'command', id: 'rm' } },
+        { action: { name: 'read_file' }, resource: { type: 'file', id: '/b' } },
+      ],
+    });
+    expect(status).toBe(200);
+    expect(body.evaluations).toHaveLength(2);
+    expect(body.evaluations[0].decision).toBe(true);
+    expect(body.evaluations[1].decision).toBe(false);
+    expect(body.evaluations[1].context.reason).toBe('deny_on_first_deny');
+  });
+
+  it('permit_on_first_permit: stops on first permit', async () => {
+    const { status, body } = await post(port, '/access/v1/evaluations', {
+      subject: { type: 'agent', id: 'a1' },
+      options: { evaluations_semantic: 'permit_on_first_permit' },
+      evaluations: [
+        { action: { name: 'read_file' }, resource: { type: 'file', id: '/a' } },
+        { action: { name: 'exec' }, resource: { type: 'command', id: 'rm' } },
+        { action: { name: 'read_file' }, resource: { type: 'file', id: '/b' } },
+      ],
+    });
+    expect(status).toBe(200);
+    expect(body.evaluations).toHaveLength(1);
+    expect(body.evaluations[0].decision).toBe(true);
+  });
+
+  it('execute_all (explicit): returns all results', async () => {
+    const { status, body } = await post(port, '/access/v1/evaluations', {
+      subject: { type: 'agent', id: 'a1' },
+      options: { evaluations_semantic: 'execute_all' },
+      evaluations: [
+        { action: { name: 'read_file' }, resource: { type: 'file', id: '/a' } },
+        { action: { name: 'exec' }, resource: { type: 'command', id: 'rm' } },
+        { action: { name: 'read_file' }, resource: { type: 'file', id: '/b' } },
+      ],
+    });
+    expect(status).toBe(200);
+    expect(body.evaluations).toHaveLength(3);
+  });
+
+  it('PDP metadata endpoint returns correct structure', async () => {
+    const { status, body } = await get(port, '/.well-known/authzen-configuration');
+    expect(status).toBe(200);
+    expect(body.issuer).toBe(`http://localhost:${port}`);
+    expect(body.evaluation_endpoint).toBe('/access/v1/evaluation');
+    expect(body.evaluations_endpoint).toBe('/access/v1/evaluations');
+    expect(body.capabilities.evaluations_supported).toBe(true);
+    expect(body.capabilities.evaluations_semantics_supported).toEqual([
+      'execute_all', 'deny_on_first_deny', 'permit_on_first_permit',
+    ]);
+    expect(body.capabilities.search_supported).toBe(false);
+  });
+
+  it('echoes X-Request-ID when provided', async () => {
+    const res = await fetch(`http://localhost:${port}/access/v1/evaluation`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Request-ID': 'test-123' },
+      body: JSON.stringify({
+        subject: { type: 'agent', id: 'a1' },
+        action: { name: 'read_file' },
+        resource: { type: 'file', id: '/x' },
+      }),
+    });
+    expect(res.headers.get('x-request-id')).toBe('test-123');
+  });
+
+  it('generates X-Request-ID when not provided', async () => {
+    const res = await fetch(`http://localhost:${port}/access/v1/evaluation`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        subject: { type: 'agent', id: 'a1' },
+        action: { name: 'read_file' },
+        resource: { type: 'file', id: '/x' },
+      }),
+    });
+    const rid = res.headers.get('x-request-id');
+    expect(rid).toBeTruthy();
+    expect(rid).toMatch(/^[0-9a-f-]{36}$/);
+  });
+});
+
 describe('AuthZEN Server - Deny Policy', () => {
   let server: AuthZenServer;
   let port: number;
