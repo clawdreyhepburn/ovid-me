@@ -25,7 +25,7 @@ describe('resolveConfig', () => {
 
   it('returns DEFAULT_CONFIG values with no args', () => {
     const config = resolveConfig();
-    expect(config.mandateMode).toBe('enforce');
+    expect(config.mandateMode).toBe('dry-run');
     expect(config.subsetProof).toBe('off');
     expect(config.defaultTtl).toBe(1800);
     expect(config.maxTtl).toBe(86400);

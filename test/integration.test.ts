@@ -83,7 +83,7 @@ describe('Integration: OVID + OVID-ME + Carapace', () => {
   it('Test 1: Happy path — both layers allow', async () => {
     // 1. Create OVID with read_file mandate scoped to /src/*
     const mandate: CedarMandate = {
-      rarFormat: 'cedar',
+      type: 'agent_mandate', rarFormat: 'cedar',
       policySet: 'permit(principal, action == Ovid::Action::"read_file", resource) when { resource.path like "/src/*" };',
     };
 
@@ -120,7 +120,7 @@ describe('Integration: OVID + OVID-ME + Carapace', () => {
     // Broad mandate
     const token = await createOvid({
       issuerKeys: rootKeys,
-      mandate: { rarFormat: 'cedar', policySet: 'permit(principal, action, resource);' },
+      mandate: { type: 'agent_mandate', rarFormat: 'cedar', policySet: 'permit(principal, action, resource);' },
     });
 
     const result = await verifyOvid(token.jwt, rootKeys.publicKey);
@@ -150,7 +150,7 @@ describe('Integration: OVID + OVID-ME + Carapace', () => {
     const token = await createOvid({
       issuerKeys: rootKeys,
       mandate: {
-        rarFormat: 'cedar',
+        type: 'agent_mandate', rarFormat: 'cedar',
         policySet: 'permit(principal, action == Ovid::Action::"read_file", resource);',
       },
     });
@@ -182,7 +182,7 @@ describe('Integration: OVID + OVID-ME + Carapace', () => {
 
     // Narrow mandate: only read_file
     const mandate: CedarMandate = {
-      rarFormat: 'cedar',
+      type: 'agent_mandate', rarFormat: 'cedar',
       policySet: 'permit(principal, action == Ovid::Action::"read_file", resource);',
     };
 
@@ -206,7 +206,7 @@ describe('Integration: OVID + OVID-ME + Carapace', () => {
     const rootToken = await createOvid({
       issuerKeys: rootKeys,
       issuer: 'root-orchestrator',
-      mandate: { rarFormat: 'cedar', policySet: 'permit(principal, action, resource);' },
+      mandate: { type: 'agent_mandate', rarFormat: 'cedar', policySet: 'permit(principal, action, resource);' },
     });
 
     // Child OVID with narrow mandate (subset of parent)
@@ -214,7 +214,7 @@ describe('Integration: OVID + OVID-ME + Carapace', () => {
       issuerKeys: rootToken.keys,
       issuerOvid: { jwt: rootToken.jwt, claims: rootToken.claims },
       mandate: {
-        rarFormat: 'cedar',
+        type: 'agent_mandate', rarFormat: 'cedar',
         policySet: 'permit(principal, action == Ovid::Action::"read_file", resource);',
       },
     });
@@ -250,7 +250,7 @@ describe('Integration: OVID + OVID-ME + Carapace', () => {
       issuerKeys: domainAKeys,
       issuer: 'domain-a.example.com',
       mandate: {
-        rarFormat: 'cedar',
+        type: 'agent_mandate', rarFormat: 'cedar',
         policySet: 'permit(principal, action == Ovid::Action::"read_file", resource);',
       },
     });

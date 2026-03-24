@@ -1,0 +1,56 @@
+namespace Ovid {
+  entity Agent {
+    name?: String,
+  };
+
+  entity Resource {
+    path?: String,
+    command?: String,
+  };
+
+  // Common actions for OVID agent tool calls.
+  // Cedar schemas require all actions to be declared — if your mandate uses
+  // custom actions not listed here, add them to this schema file.
+  // See docs/CEDAR-SUPPORT.md for details.
+
+  action "read_file" appliesTo {
+    principal: [Agent],
+    resource: [Resource],
+    context: {},
+  };
+  action "write_file" appliesTo {
+    principal: [Agent],
+    resource: [Resource],
+    context: {},
+  };
+  action "exec" appliesTo {
+    principal: [Agent],
+    resource: [Resource],
+    context: {},
+  };
+  action "use_tool" appliesTo {
+    principal: [Agent],
+    resource: [Resource],
+    context: {},
+  };
+  action "web_fetch" appliesTo {
+    principal: [Agent],
+    resource: [Resource],
+    context: {},
+  };
+  action "message" appliesTo {
+    principal: [Agent],
+    resource: [Resource],
+    context: {},
+  };
+  action "spawn_agent" appliesTo {
+    principal: [Agent],
+    resource: [Resource],
+    context: {},
+  };
+  action "mcp_call" appliesTo {
+    principal: [Agent],
+    resource: [Resource],
+    context: {},
+  };
+}

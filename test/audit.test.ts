@@ -7,6 +7,7 @@ import type { CedarMandate } from '../src/config.js';
 const TEST_LOG = '/tmp/ovid-test-audit.jsonl';
 
 const testMandate: CedarMandate = {
+  type: 'agent_mandate',
   rarFormat: 'cedar',
   policySet: 'permit(principal, action == Ovid::Action::"read_file", resource);',
 };

@@ -10,11 +10,12 @@
  *   - permit/forbid(principal, action, resource) when { resource.path like "/src/*" }
  *   - permit/forbid(principal, action, resource) — wildcard
  *
- * NOT supported (yet):
- *   - Nested conditions (unless/when with boolean combinators)
- *   - Principal or resource equality constraints in head
- *   - Context conditions beyond resource.path like "..."
+ * NOT supported (rejected in strict mode):
+ *   - unless clauses
+ *   - Nested when with boolean combinators (&& / ||)
+ *   - principal == / resource == constraints in head
  *   - has operator, .contains(), decimal/IP extensions
+ *   - Context conditions beyond resource.path like "..."
  */
 
 import { evaluateWithWasm, isWasmAvailable } from './cedar-engine-wasm.js';
@@ -35,6 +36,12 @@ export interface EvaluateResult {
   reason?: string;
 }
 
+export interface ParseError {
+  line: number;
+  message: string;
+  unsupportedFeature: string;
+}
+
 interface ParsedPolicy {
   effect: 'permit' | 'forbid';
   actions: string[] | null; // null = wildcard (matches any)
@@ -42,16 +49,151 @@ interface ParsedPolicy {
   raw: string;
 }
 
+export interface ParseOptions {
+  /** Reject policies with unsupported Cedar syntax. Default: true. */
+  strict?: boolean;
+}
+
+/**
+ * Detect unsupported Cedar features in a policy block.
+ * Returns a list of parse errors, empty if the block is fully supported.
+ */
+function detectUnsupportedFeatures(block: string): ParseError[] {
+  const errors: ParseError[] = [];
+
+  // Find approximate line number for the block start
+  const lineNum = 1; // Simplified — block-level line tracking
+
+  // unless clause
+  if (/\bunless\s*\{/.test(block)) {
+    errors.push({
+      line: lineNum,
+      message: 'unless clauses are not supported by the fallback engine',
+      unsupportedFeature: 'unless',
+    });
+  }
+
+  // principal == constraint in head
+  if (/principal\s*==\s*/.test(block)) {
+    errors.push({
+      line: lineNum,
+      message: 'principal == constraints are not supported by the fallback engine',
+      unsupportedFeature: 'principal_equality',
+    });
+  }
+
+  // resource == constraint in head
+  if (/resource\s*==\s*/.test(block)) {
+    errors.push({
+      line: lineNum,
+      message: 'resource == constraints are not supported by the fallback engine',
+      unsupportedFeature: 'resource_equality',
+    });
+  }
+
+  // has operator
+  if (/\bhas\s+\w/.test(block)) {
+    errors.push({
+      line: lineNum,
+      message: 'has operator is not supported by the fallback engine',
+      unsupportedFeature: 'has',
+    });
+  }
+
+  // .contains(), .containsAll(), .containsAny()
+  if (/\.contains(All|Any)?\s*\(/.test(block)) {
+    errors.push({
+      line: lineNum,
+      message: '.contains() methods are not supported by the fallback engine',
+      unsupportedFeature: 'contains',
+    });
+  }
+
+  // Boolean combinators in when clause (&&, ||) beyond simple resource.path like
+  const whenMatch = block.match(/when\s*\{([^}]*)\}/s);
+  if (whenMatch) {
+    const whenBody = whenMatch[1];
+    if (/&&/.test(whenBody) || /\|\|/.test(whenBody)) {
+      errors.push({
+        line: lineNum,
+        message: 'boolean combinators (&&, ||) in when clauses are not supported by the fallback engine',
+        unsupportedFeature: 'boolean_combinators',
+      });
+    }
+    // context.X references (other than resource.path like)
+    if (/context\./.test(whenBody)) {
+      errors.push({
+        line: lineNum,
+        message: 'context conditions are not supported by the fallback engine',
+        unsupportedFeature: 'context_conditions',
+      });
+    }
+    // Unsupported when conditions (anything other than resource.path like "...")
+    const stripped = whenBody.trim();
+    if (stripped && !/^resource\.path\s+like\s+"[^"]*"\s*$/.test(stripped)) {
+      // Check if it's a supported pattern we already flagged
+      if (!errors.some(e => e.unsupportedFeature === 'boolean_combinators' || e.unsupportedFeature === 'context_conditions')) {
+        errors.push({
+          line: lineNum,
+          message: `unsupported when condition: ${stripped.slice(0, 80)}`,
+          unsupportedFeature: 'unsupported_when',
+        });
+      }
+    }
+  }
+
+  // principal in (entity hierarchy, not action in [...])
+  if (/principal\s+in\s+/.test(block)) {
+    errors.push({
+      line: lineNum,
+      message: 'principal hierarchy (in) is not supported by the fallback engine',
+      unsupportedFeature: 'principal_hierarchy',
+    });
+  }
+
+  // resource in (entity hierarchy)
+  if (/resource\s+in\s+/.test(block)) {
+    errors.push({
+      line: lineNum,
+      message: 'resource hierarchy (in) is not supported by the fallback engine',
+      unsupportedFeature: 'resource_hierarchy',
+    });
+  }
+
+  return errors;
+}
+
 /**
  * Parse Cedar policy text into structured policies.
+ *
+ * @param cedarText - Cedar policy text
+ * @param options - Parse options. strict (default: true) rejects unsupported syntax.
+ * @throws Error if strict mode is enabled and unsupported syntax is detected
  */
-export function parsePolicies(cedarText: string): ParsedPolicy[] {
+export function parsePolicies(cedarText: string, options?: ParseOptions): ParsedPolicy[] {
+  const strict = options?.strict ?? true;
   const policies: ParsedPolicy[] = [];
   // Split on top-level permit/forbid boundaries
   const blocks = cedarText.match(/(permit|forbid)\s*\([^;]*;/gs);
   if (!blocks) return policies;
 
+  const allErrors: ParseError[] = [];
+
   for (const block of blocks) {
+    // Check for unsupported features
+    const errors = detectUnsupportedFeatures(block);
+    if (errors.length > 0) {
+      if (strict) {
+        allErrors.push(...errors);
+        continue; // Don't parse this block
+      }
+      // Non-strict: warn and skip
+      for (const err of errors) {
+        console.warn(`[ovid] skipping unsupported Cedar syntax: ${err.message}`);
+      }
+      continue;
+    }
+
     const effect = block.trimStart().startsWith('forbid') ? 'forbid' as const : 'permit' as const;
 
     // Extract action constraint
@@ -80,7 +222,28 @@ export function parsePolicies(cedarText: string): ParsedPolicy[] {
     policies.push({ effect, actions, resourceGlob, raw: block.trim() });
   }
 
+  if (strict && allErrors.length > 0) {
+    const details = allErrors.map(e => e.unsupportedFeature).join(', ');
+    throw new UnsupportedCedarSyntaxError(
+      `unsupported Cedar syntax: ${details}`,
+      allErrors,
+    );
+  }
+
   return policies;
+}
+
+/**
+ * Error thrown when strict parsing encounters unsupported Cedar features.
+ */
+export class UnsupportedCedarSyntaxError extends Error {
+  public readonly errors: ParseError[];
+
+  constructor(message: string, errors: ParseError[]) {
+    super(message);
+    this.name = 'UnsupportedCedarSyntaxError';
+    this.errors = errors;
+  }
 }
 
 /**
@@ -140,12 +303,27 @@ export async function evaluateMandateAsync(
 /**
  * Evaluate a request against Cedar policy text (synchronous string-matching fallback).
  * Returns allow/deny with Cedar semantics (default-deny, forbid overrides permit).
+ *
+ * Uses strict parsing by default — rejects policies with unsupported Cedar syntax
+ * rather than silently mis-evaluating them.
  */
 export function evaluateMandate(
   cedarText: string,
   request: EvaluateRequest,
+  options?: ParseOptions,
 ): { decision: 'allow' | 'deny'; matchedPolicy?: string; reason?: string } {
-  const policies = parsePolicies(cedarText);
+  let policies: ParsedPolicy[];
+  try {
+    policies = parsePolicies(cedarText, options);
+  } catch (err) {
+    if (err instanceof UnsupportedCedarSyntaxError) {
+      return {
+        decision: 'deny',
+        reason: `unsupported Cedar syntax: ${err.errors.map(e => e.unsupportedFeature).join(', ')}. Install @janssenproject/cedarling_wasm for full Cedar support.`,
+      };
+    }
+    throw err;
+  }
 
   if (policies.length === 0) {
     return { decision: 'deny', reason: 'no policies defined' };

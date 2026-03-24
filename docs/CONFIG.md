@@ -20,7 +20,7 @@ const ovid = await createOvid({
     sub: 'my-worker',
     agent_pub: child.publicKeyBase64,
     mandate: {
-      rarFormat: 'cedar',
+      type: 'agent_mandate', rarFormat: 'cedar',
       policySet: 'permit(principal, action, resource) when { resource.path like "/safe/*" };'
     }
   }
@@ -47,12 +47,14 @@ const config: OvidConfig = {
   // "shadow"  — enforce the current mandate AND evaluate a candidate
   //             mandate in parallel. Candidate results are logged only.
   //             Use this when tightening an existing mandate.
-  mandateMode: "enforce",  // default: "enforce"
+  mandateMode: "dry-run",  // default: "dry-run"
+  // Start with dry-run to understand your agents' access patterns.
+  // Switch to enforce when confident.
 
   // Shadow mode only: candidate mandate to evaluate alongside the real one.
   // Ignored unless mandateMode is "shadow".
   shadowMandate: {
-    rarFormat: "cedar",
+    type: "agent_mandate", rarFormat: "cedar",
     policySet: 'permit(principal, action == Ovid::Action::"read_file", resource);'
   },
 
@@ -250,7 +252,7 @@ Full enforcement, mandatory proofs, fail-closed everything, short TTLs, restrict
 const config: Partial<OvidConfig> = {
   mandateMode: "shadow",
   shadowMandate: {
-    rarFormat: "cedar",
+    type: "agent_mandate", rarFormat: "cedar",
     policySet: `
       // Tighter mandate: remove exec permission
       permit(principal, action == Ovid::Action::"read_file", resource);

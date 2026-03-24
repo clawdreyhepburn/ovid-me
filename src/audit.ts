@@ -34,7 +34,7 @@ export class AuditLogger {
       jti: claims.jti,
       iss: claims.iss,
       sub: claims.sub,
-      role: claims.role ?? 'mandate',
+      role: 'mandate',
       mandate: claims.mandate ? 'present' : 'absent',
       parent_chain: claims.parent_chain,
       exp: claims.exp,

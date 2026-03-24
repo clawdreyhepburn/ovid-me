@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { MandateEngine } from '../src/mandate-engine.js';
 import type { CedarMandate } from '@clawdreyhepburn/ovid';
 
-const makeMandate = (cedar: string): CedarMandate => ({ rarFormat: 'cedar' as const, policySet: cedar });
+const makeMandate = (cedar: string): CedarMandate => ({ type: 'agent_mandate', rarFormat: 'cedar' as const, policySet: cedar });
 
 describe('MandateEngine', () => {
   it('enforce mode — deny', async () => {

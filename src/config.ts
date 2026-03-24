@@ -131,10 +131,10 @@ export interface OvidConfig {
   dashboardPort: number
 }
 
-/** Default configuration — safe, minimal, no enforcement. */
+/** Default configuration — safe, minimal, dry-run: see what would be blocked before enabling enforcement. */
 export const DEFAULT_CONFIG: OvidConfig = {
   engine: 'auto',
-  mandateMode: 'enforce',
+  mandateMode: 'dry-run',
   subsetProof: 'off',
   proofFailure: 'deny',
   proofTimeoutMs: 5000,

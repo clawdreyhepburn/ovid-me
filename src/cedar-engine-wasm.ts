@@ -70,9 +70,41 @@ export function getWasmLoadError(): string | null {
 }
 
 /**
- * Build a Cedarling policy store from Cedar policy text for the Ovid namespace.
+ * Extract all action names referenced in Cedar policy text.
+ * Scans for Ovid::Action::"..." patterns and includes base actions.
  */
-function buildPolicyStore(cedarText: string): any {
+function extractActions(cedarText: string): string[] {
+  const matches = [...cedarText.matchAll(/Ovid::Action::"([^"]+)"/g)];
+  const actions = new Set(matches.map(m => m[1]));
+  // Always include base actions
+  actions.add('read_file');
+  actions.add('write_file');
+  actions.add('exec');
+  return [...actions];
+}
+
+/**
+ * Build a Cedarling policy store from Cedar policy text for the Ovid namespace.
+ * Dynamically generates schema actions from the policy text.
+ */
+function buildPolicyStore(cedarText: string, requestAction?: string): any {
+  const actionNames = extractActions(cedarText);
+  // Also include the request action (it must be in the schema even if not in policy)
+  if (requestAction && !actionNames.includes(requestAction)) {
+    actionNames.push(requestAction);
+  }
+
+  const actions: Record<string, any> = {};
+  for (const name of actionNames) {
+    actions[name] = {
+      appliesTo: {
+        principalTypes: ['Agent'],
+        resourceTypes: ['Resource'],
+        context: { type: 'Record', attributes: {} },
+      },
+    };
+  }
+
   const schema = {
     Ovid: {
       entityTypes: {
@@ -93,30 +125,7 @@ function buildPolicyStore(cedarText: string): any {
           },
         },
       },
-      actions: {
-        // Dynamic actions are handled by Cedarling — we define common ones
-        read_file: {
-          appliesTo: {
-            principalTypes: ['Agent'],
-            resourceTypes: ['Resource'],
-            context: { type: 'Record', attributes: {} },
-          },
-        },
-        write_file: {
-          appliesTo: {
-            principalTypes: ['Agent'],
-            resourceTypes: ['Resource'],
-            context: { type: 'Record', attributes: {} },
-          },
-        },
-        exec: {
-          appliesTo: {
-            principalTypes: ['Agent'],
-            resourceTypes: ['Resource'],
-            context: { type: 'Record', attributes: {} },
-          },
-        },
-      },
+      actions,
     },
   };
 
@@ -156,7 +165,7 @@ export async function evaluateWithWasm(
   if (!wasm) return null;
 
   try {
-    const policyStore = buildPolicyStore(cedarText);
+    const policyStore = buildPolicyStore(cedarText, request.action);
     const config = {
       CEDARLING_APPLICATION_NAME: 'OVID',
       CEDARLING_POLICY_STORE_LOCAL: JSON.stringify(policyStore),
