@@ -64,6 +64,58 @@ const server = await startDashboard({
 // → OVID Dashboard: http://localhost:19831
 ```
 
+## AuthZEN PDP API
+
+OVID-ME includes an [AuthZEN](https://openid.github.io/authzen/)-compliant Policy Decision Point (PDP) API.
+
+### Quick start
+
+```typescript
+import { AuthZenServer } from '@clawdreyhepburn/ovid-me';
+
+const server = new AuthZenServer({
+  defaultPolicy: 'permit(principal, action == Ovid::Action::"read_file", resource);',
+});
+await server.start(19832);
+```
+
+### Evaluate a request
+
+```bash
+curl -X POST http://localhost:19832/access/v1/evaluation \
+  -H "Content-Type: application/json" \
+  -d '{
+    "subject": { "type": "agent", "id": "agent-47" },
+    "action": { "name": "read_file" },
+    "resource": { "type": "file", "id": "/src/index.ts" }
+  }'
+```
+
+Response:
+```json
+{ "decision": true, "context": { "reason_admin": { "en": "Permitted by mandate" } } }
+```
+
+### Batch evaluation
+
+```bash
+curl -X POST http://localhost:19832/access/v1/evaluations \
+  -H "Content-Type: application/json" \
+  -d '{
+    "evaluations": [
+      { "subject": { "type": "agent", "id": "a1" }, "action": { "name": "read_file" }, "resource": { "type": "file", "id": "/src/index.ts" } },
+      { "subject": { "type": "agent", "id": "a1" }, "action": { "name": "exec" }, "resource": { "type": "command", "id": "rm -rf /" } }
+    ]
+  }'
+```
+
+### Mandate sources
+
+The server resolves mandates in priority order:
+1. **Inline** — `context.authorization_details` in the request body
+2. **Token** — `context.ovid_token` (planned, not yet implemented)
+3. **Default policy** — configured at server startup
+
 ## Related Projects
 
 - [`@clawdreyhepburn/ovid`](https://github.com/clawdreyhepburn/ovid) — cryptographic identity (token creation, verification, keypairs)
