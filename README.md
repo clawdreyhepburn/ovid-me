@@ -130,10 +130,25 @@ The server resolves mandates in priority order:
 2. **Token** — `context.ovid_token` (planned, not yet implemented)
 3. **Default policy** — configured at server startup
 
+## Two-Layer Enforcement Model
+
+OVID-ME is one half of a two-layer authorization stack. Both layers must allow a tool call for it to proceed:
+
+| Layer | What it enforces | Who defines it |
+|-------|-----------------|----------------|
+| **[Carapace](https://github.com/clawdreyhepburn/carapace)** | Deployment ceiling — what tools are allowed at all | The human, via Cedar policies |
+| **OVID-ME** | Parent mandate — what the spawning agent delegated | The parent agent, via OVID JWT |
+
+Carapace runs on every `before_tool_call` hook as the human's hard limit. OVID-ME evaluates the mandate embedded in the agent's OVID token. A sub-agent with a broad mandate can't exceed the deployment ceiling, and a permissive deployment can't override a narrow mandate.
+
+### PolicySource integration
+
+Carapace implements the `PolicySource` interface (`getEffectivePolicy(principal)`), which OVID-ME can query at **mandate issuance time** to verify that a new mandate is a subset of the deployment ceiling. This prevents issuing mandates that would always be blocked — catching policy conflicts at delegation time rather than at enforcement time.
+
 ## Related Projects
 
-- [`@clawdreyhepburn/ovid`](https://github.com/clawdreyhepburn/ovid) — cryptographic identity (token creation, verification, keypairs)
-- [`@clawdreyhepburn/carapace`](https://github.com/clawdreyhepburn/carapace) — deployment-level policy ceiling (binary allow/deny, implements PolicySource so OVID-ME can query it)
+- [`@clawdreyhepburn/ovid`](https://github.com/clawdreyhepburn/ovid) — cryptographic identity for AI agents (Ed25519 JWTs, delegation chains, mandate embedding)
+- [`@clawdreyhepburn/carapace`](https://github.com/clawdreyhepburn/carapace) — deployment-level Cedar policy enforcement via OpenClaw's `before_tool_call` hook
 
 ## License
 
