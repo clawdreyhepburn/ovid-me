@@ -1,7 +1,7 @@
 {
   "name": "@clawdreyhepburn/ovid-me",
-  "version": "0.1.0",
-  "description": "Cedar policy evaluation for OVID agent mandates \u2014 enforcement, audit, and dashboard",
+  "version": "0.1.1",
+  "description": "Cedar policy evaluation for OVID agent mandates — enforcement, audit, and dashboard",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
