@@ -24,7 +24,7 @@ Agent delegation is broken.
 
 When a primary agent spawns a sub-agent, the sub-agent typically inherits the parent's full credentials — same API keys, same OAuth tokens, same tool access. A helpdesk agent that spawns a "check Okta attributes" sub-agent has inadvertently created something with the power to reconfigure Active Directory. The permissions don't narrow. The context does.
 
-This is the problem [Khaled Zaky describes](https://khaledzaky.com/blog/delegation-is-the-real-identity-problem-in-agentic-ai) as the real identity challenge in agentic AI: authority moves across hops, but nothing in the system ensures that scope narrows as work gets delegated. OAuth Token Exchange ([RFC 8693](https://www.rfc-editor.org/rfc/rfc8693)) can express pairwise delegation, but it wasn't built for multi-hop agent chains. It doesn't require stepwise scope narrowing. It doesn't bind tokens to specific transactions. It doesn't give you the auditability you need when the fifth agent in a chain does something the first agent never intended.
+Authority moves across hops, but nothing in the system ensures that scope narrows as work gets delegated. OAuth Token Exchange ([RFC 8693](https://www.rfc-editor.org/rfc/rfc8693)) can express pairwise delegation, but it wasn't built for multi-hop agent chains. It doesn't require stepwise scope narrowing. It doesn't bind tokens to specific transactions. It doesn't give you the auditability you need when the fifth agent in a chain does something the first agent never intended.
 
 OVID-ME is our answer to: **how do you actually enforce attenuated permissions at every hop?**
 
@@ -287,7 +287,6 @@ OVID-ME is informed by and builds on:
 - **[OVID](https://github.com/clawdreyhepburn/ovid)** — cryptographic agent identity (Ed25519 JWTs, delegation chains)
 - **[Carapace](https://github.com/clawdreyhepburn/carapace)** — deployment-level Cedar policy enforcement
 
-See also: Khaled Zaky's [Delegation Is the Real Identity Problem in Agentic AI](https://khaledzaky.com/blog/delegation-is-the-real-identity-problem-in-agentic-ai) for an excellent overview of why this problem matters in regulated environments.
 
 ## License
 
