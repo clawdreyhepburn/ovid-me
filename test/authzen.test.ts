@@ -99,6 +99,7 @@ describe('AuthZEN Server - Permit Policy', () => {
 
   beforeAll(async () => {
     server = new AuthZenServer({
+      security: { auth: { disabled: true } },
       port: 0,
       defaultPolicy: 'permit(principal, action == Ovid::Action::"read_file", resource);',
       ovidConfig: { mandateMode: 'enforce', engine: 'fallback' },
@@ -204,6 +205,7 @@ describe('AuthZEN Server - Batch Defaults & Semantics', () => {
 
   beforeAll(async () => {
     server = new AuthZenServer({
+      security: { auth: { disabled: true } },
       port: 0,
       defaultPolicy: 'permit(principal, action == Ovid::Action::"read_file", resource);',
       ovidConfig: { mandateMode: 'enforce', engine: 'fallback' },
@@ -291,7 +293,7 @@ describe('AuthZEN Server - Batch Defaults & Semantics', () => {
   it('PDP metadata endpoint returns correct structure', async () => {
     const { status, body } = await get(port, '/.well-known/authzen-configuration');
     expect(status).toBe(200);
-    expect(body.issuer).toBe(`http://localhost:${port}`);
+    expect(body.issuer).toBe(`http://127.0.0.1:${port}`);
     expect(body.evaluation_endpoint).toBe('/access/v1/evaluation');
     expect(body.evaluations_endpoint).toBe('/access/v1/evaluations');
     expect(body.capabilities.evaluations_supported).toBe(true);
@@ -336,6 +338,7 @@ describe('AuthZEN Server - Deny Policy', () => {
 
   beforeAll(async () => {
     server = new AuthZenServer({
+      security: { auth: { disabled: true } },
       port: 0,
       defaultPolicy: 'forbid(principal, action, resource);',
       ovidConfig: { mandateMode: 'enforce', engine: 'fallback' },
@@ -363,6 +366,7 @@ describe('AuthZEN Server - No Default Policy', () => {
 
   beforeAll(async () => {
     server = new AuthZenServer({
+      security: { auth: { disabled: true } },
       port: 0,
       ovidConfig: { mandateMode: 'enforce', engine: 'fallback' },
     });

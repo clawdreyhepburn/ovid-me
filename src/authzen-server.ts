@@ -24,11 +24,20 @@ import {
   type AuthZenBatchResponse,
   type AuthZenBatchOptions,
 } from './authzen.js';
+import {
+  resolveSecurity,
+  applyCors,
+  verifyAuth,
+  announceAuthToken,
+  type SecurityConfig,
+  type ResolvedSecurity,
+} from './server-security.js';
 
 export interface AuthZenServerConfig {
   port?: number;
   defaultPolicy?: string;
   ovidConfig?: Partial<OvidConfig>;
+  security?: SecurityConfig;
 }
 
 export class AuthZenServer {
@@ -37,22 +46,29 @@ export class AuthZenServer {
   private defaultPolicy?: string;
   private port: number;
   private issuer: string = '';
+  private security: ResolvedSecurity;
 
   constructor(config?: AuthZenServerConfig) {
     this.engine = new MandateEngine(config?.ovidConfig);
     this.defaultPolicy = config?.defaultPolicy;
     this.port = config?.port ?? 19832;
+    this.security = resolveSecurity(config?.security);
   }
+
+  /** Expose the effective bearer token (null when auth is disabled). */
+  getAuthToken(): string | null { return this.security.token; }
 
   async start(port?: number): Promise<void> {
     const p = port ?? this.port;
     this.server = createServer((req, res) => this.handle(req, res));
     return new Promise((resolve) => {
-      this.server!.listen(p, () => {
+      this.server!.listen(p, this.security.bindHost, () => {
         const addr = this.server!.address();
         const actualPort = typeof addr === 'object' && addr ? addr.port : p;
-        this.issuer = `http://localhost:${actualPort}`;
+        this.issuer = `http://${this.security.bindHost}:${actualPort}`;
+        // eslint-disable-next-line no-console
         console.log(`OVID AuthZEN PDP: ${this.issuer}`);
+        announceAuthToken('authzen', this.security);
         resolve();
       });
     });
@@ -74,15 +90,13 @@ export class AuthZenServer {
     const requestId = req.headers['x-request-id'] as string || crypto.randomUUID();
     res.setHeader('X-Request-ID', requestId);
 
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Request-ID');
+    // CORS (no-op unless explicitly allowlisted in config)
+    if (applyCors(req, res, this.security)) return;
 
-    if (req.method === 'OPTIONS') {
-      res.writeHead(204);
-      res.end();
-      return;
-    }
+    // Bearer-token auth. Applies to every route including discovery and
+    // well-known configuration -- we don't want an unauthenticated endpoint
+    // advertising the topology of the PDP.
+    if (!verifyAuth(req, res, this.security)) return;
 
     if (path === '/' && req.method === 'GET') {
       this.json(res, 200, {

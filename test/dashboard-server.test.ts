@@ -47,7 +47,7 @@ describe('Dashboard Server - Empty', () => {
 
   beforeAll(async () => {
     dbPath = tmpDb();
-    server = new DashboardServer({ port: 0, dbPath });
+    server = new DashboardServer({ port: 0, dbPath, security: { auth: { disabled: true } } });
     await server.start();
     // Extract actual port
     port = (server as any).server.address().port;
@@ -107,7 +107,7 @@ describe('Dashboard Server - Seeded Data', () => {
 
   beforeAll(async () => {
     dbPath = tmpDb();
-    server = new DashboardServer({ port: 0, dbPath });
+    server = new DashboardServer({ port: 0, dbPath, security: { auth: { disabled: true } } });
     await server.start();
     port = (server as any).server.address().port;
     db = server.getDatabase();
@@ -310,25 +310,13 @@ describe('Dashboard Server - Seeded Data', () => {
     expect(body[0].total).toBe(9);
   });
 
-  it('POST /api/import imports JSONL correctly', async () => {
-    const logPath = join(tmpdir(), `ovid-import-test-${Date.now()}.jsonl`);
-    const lines = [
-      JSON.stringify({ ts: '2025-06-01T00:00:00Z', event: 'issuance', jti: 'imported-1', iss: 'root', mandate_summary: 'tester', parent_chain: [], exp: 9999999999 }),
-      JSON.stringify({ ts: '2025-06-01T00:01:00Z', event: 'decision', agentJti: 'imported-1', action: 'test', resource: 'foo', decision: 'allow-proven', policies: ['p1'] }),
-    ];
-    writeFileSync(logPath, lines.join('\n'));
-    const { status, body } = await post(port, '/api/import', { path: logPath });
-    expect(status).toBe(200);
-    expect(body.imported).toBe(2);
-    try { unlinkSync(logPath); } catch {}
-  });
-
-  it('POST /api/import handles invalid JSON body', async () => {
-    const res = await fetch(`http://localhost:${port}/api/import`, {
-      method: 'POST',
-      body: 'not json',
-    });
-    expect(res.status).toBe(400);
+  it('POST /api/import is removed (arbitrary-file-read mitigation)', async () => {
+    // The previous endpoint took a server-local path and read it. This
+    // was an arbitrary file disclosure for anyone who could reach the
+    // dashboard. It has been removed; programmatic callers use
+    // AuditDatabase.importJsonl() directly.
+    const { status } = await post(port, '/api/import', { path: '/etc/passwd' });
+    expect(status).toBe(404);
   });
 
   it('handles URL-encoded JTI with slashes', async () => {

@@ -20,3 +20,5 @@ export type { AuthZenSubject, AuthZenAction, AuthZenResource, AuthZenRequest, Au
 export { authzenToEvaluateRequest, evaluateResultToAuthzen, validateAuthZenRequest } from './authzen.js';
 export { AuthZenServer } from './authzen-server.js';
 export type { AuthZenServerConfig } from './authzen-server.js';
+export { resolveSecurity, applyCors, verifyAuth, announceAuthToken } from './server-security.js';
+export type { SecurityConfig, AuthConfig, ResolvedSecurity } from './server-security.js';

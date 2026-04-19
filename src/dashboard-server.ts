@@ -1,28 +1,43 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
-import { readFileSync } from 'node:fs';
 import { AuditDatabase } from './audit-db.js';
 import { dashboardHtml } from './dashboard-html.js';
+import {
+  resolveSecurity,
+  applyCors,
+  verifyAuth,
+  announceAuthToken,
+  type SecurityConfig,
+  type ResolvedSecurity,
+} from './server-security.js';
 
 interface DashboardOptions {
   port?: number;
   dbPath?: string;
+  security?: SecurityConfig;
 }
 
 export class DashboardServer {
   private db: AuditDatabase;
   private server: Server | null = null;
   private port: number;
+  private security: ResolvedSecurity;
 
   constructor(opts?: DashboardOptions) {
     this.port = opts?.port ?? 19831;
     this.db = new AuditDatabase(opts?.dbPath);
+    this.security = resolveSecurity(opts?.security);
   }
+
+  /** Expose the effective bearer token (null when auth is disabled). */
+  getAuthToken(): string | null { return this.security.token; }
 
   async start(): Promise<void> {
     this.server = createServer((req, res) => this.handle(req, res));
     return new Promise((resolve) => {
-      this.server!.listen(this.port, () => {
-        console.log(`OVID Dashboard: http://localhost:${this.port}`);
+      this.server!.listen(this.port, this.security.bindHost, () => {
+        // eslint-disable-next-line no-console
+        console.log(`OVID Dashboard: http://${this.security.bindHost}:${this.port}`);
+        announceAuthToken('dashboard', this.security);
         resolve();
       });
     });
@@ -45,7 +60,13 @@ export class DashboardServer {
     const from = url.searchParams.get('from') ? parseInt(url.searchParams.get('from')!) : undefined;
     const to = url.searchParams.get('to') ? parseInt(url.searchParams.get('to')!) : undefined;
 
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    // CORS (no-op unless explicitly allowlisted in config)
+    if (applyCors(req, res, this.security)) return;
+
+    // Bearer-token auth. GET /?token=<t> and Authorization: Bearer are
+    // both accepted; the index HTML is also behind auth to prevent
+    // drive-by browsing.
+    if (!verifyAuth(req, res, this.security)) return;
 
     try {
       if (path === '/' && req.method === 'GET') {
@@ -112,20 +133,12 @@ export class DashboardServer {
       } else if (route.startsWith('roles/') && !route.slice(6).includes('/')) {
         const role = decodeURIComponent(route.slice(6));
         data = this.db.getMandateActions(role, from, to);
-      } else if (route === 'import' && req.method === 'POST') {
-        // Simple: read body as path to JSONL file
-        let body = '';
-        req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
-        req.on('end', () => {
-          try {
-            const { path: logPath } = JSON.parse(body);
-            const result = this.db.importJsonl(logPath);
-            this.json(res, result);
-          } catch (e: any) {
-            res.writeHead(400); res.end(JSON.stringify({ error: e.message }));
-          }
-        });
-        return;
+      // NOTE: the previous POST /api/import route was removed. It took a
+      // server-local filesystem path from the request body and read it,
+      // which was an arbitrary-file-disclosure primitive for anyone who
+      // could reach the dashboard. Callers that need to import should
+      // use AuditDatabase.importJsonl() programmatically from a process
+      // that already has the intended filesystem authority.
       } else {
         res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return;
       }
