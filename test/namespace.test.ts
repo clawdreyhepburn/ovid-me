@@ -100,15 +100,28 @@ describe('namespace-agnostic action parsing (finding #6 regression)', () => {
     expect(result.decision).toBe('allow');
   });
 
-  // NOTE: We intentionally do NOT add a WASM end-to-end Jans:: test here.
-  // The WASM path currently returns null on all inputs (see finding #11 —
-  // Cedarling schema format appears to be rejected by the pinned Cedarling
-  // version). The WASM namespace fix is still correct — it makes WASM
-  // namespace-agnostic for when the path is repaired — but there is no
-  // point asserting end-to-end Jans:: allow/deny until WASM itself works.
-  // The fallback parser IS exercised here and is what matters for any
-  // Carapace→OVID-ME pipeline right now (engine='fallback' or 'auto' when
-  // WASM is unavailable).
+  it('WASM engine evaluates Jans:: policies correctly (finding #9 bridge)', async () => {
+    // Skip if WASM isn't available on this host.
+    if (!(await isWasmAvailable())) return;
+
+    const policy = 'permit(principal, action == Jans::Action::"exec_command", resource);';
+
+    // Matching action through WASM.
+    const allowResult = await evaluateMandateAsync(policy, 'agent-1', {
+      action: 'exec_command',
+      resource: '/bin/ls',
+    }, 'wasm');
+    expect(allowResult.decision).toBe('allow');
+    expect(allowResult.engine).toBe('wasm');
+
+    // Non-matching action through WASM.
+    const denyResult = await evaluateMandateAsync(policy, 'agent-1', {
+      action: 'rm_rf',
+      resource: '/',
+    }, 'wasm');
+    expect(denyResult.decision).toBe('deny');
+    expect(denyResult.engine).toBe('wasm');
+  });
 
   it('tracks all namespaces seen in a mixed policy', () => {
     const policies = parsePolicies(

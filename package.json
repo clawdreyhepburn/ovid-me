@@ -41,7 +41,7 @@
     "better-sqlite3": "^12.8.0",
     "jose": "^6.0.0",
     "@clawdreyhepburn/ovid": ">=0.2.0",
-    "@janssenproject/cedarling_wasm": "^2.0.0"
+    "@janssenproject/cedarling_wasm": "^1.15.0"
   },
   "devDependencies": {
     "@clawdreyhepburn/ovid": "file:../ovid",

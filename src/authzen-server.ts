@@ -32,6 +32,7 @@ import {
   type SecurityConfig,
   type ResolvedSecurity,
 } from './server-security.js';
+import { OVID_ME_VERSION } from './version.js';
 
 export interface AuthZenServerConfig {
   port?: number;
@@ -101,7 +102,7 @@ export class AuthZenServer {
     if (path === '/' && req.method === 'GET') {
       this.json(res, 200, {
         implementation: 'OVID-ME AuthZEN PDP',
-        version: '0.2.0',
+        version: OVID_ME_VERSION,
         spec_version: '1.0',
         cedar_engine: 'cedarling-wasm',
       });

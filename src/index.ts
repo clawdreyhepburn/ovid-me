@@ -1,5 +1,6 @@
 // Re-export types for convenience
 export type { AuthorizationDetail, CedarMandate } from '@clawdreyhepburn/ovid';
+export { OVID_ME_VERSION } from './version.js';
 
 export { AuditLogger, createAuditLogger, defaultAuditLogger } from './audit.js';
 export type { DecisionOutcome, AuditEntry } from './audit.js';
