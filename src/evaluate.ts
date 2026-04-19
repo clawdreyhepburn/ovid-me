@@ -46,6 +46,7 @@ interface ParsedPolicy {
   effect: 'permit' | 'forbid';
   actions: string[] | null; // null = wildcard (matches any)
   resourceGlob: string | null; // null = wildcard
+  actionNamespaces: string[]; // namespaces seen in action clause (e.g. ['Ovid', 'Jans'])
   raw: string;
 }
 
@@ -196,21 +197,69 @@ export function parsePolicies(cedarText: string, options?: ParseOptions): Parsed
 
     const effect = block.trimStart().startsWith('forbid') ? 'forbid' as const : 'permit' as const;
 
-    // Extract action constraint
+    // Extract action constraint.
+    //
+    // Namespace-agnostic: we accept any `<Namespace>::Action::"<name>"` form,
+    // record the namespace, and extract the action name. Policies written in
+    // Ovid::, Jans::, or any other namespace are all parsed the same way.
+    //
+    // Parse errors (malformed action clauses that we can't interpret) produce
+    // an explicit error rather than silently falling through to the wildcard
+    // case. Historical bug: a `Jans::Action::...` clause used to leave
+    // `actions = null`, which `policyMatchesRequest` treated as wildcard-
+    // matches-every-action. That fail-open behavior is now closed — an
+    // action clause that parses as NEITHER a recognized list NOR a single
+    // equality is rejected as a parse error (and in strict mode, the whole
+    // block is dropped).
     let actions: string[] | null = null;
+    const actionNamespaces: string[] = [];
 
-    // Action list: action in [Ovid::Action::"x", ...]
-    const listMatch = block.match(/action\s+in\s*\[([^\]]+)\]/);
-    if (listMatch) {
-      actions = [...listMatch[1].matchAll(/Ovid::Action::"([^"]+)"/g)].map(m => m[1]);
-    } else {
-      // Single action: action == Ovid::Action::"x"
-      const singleMatch = block.match(/action\s*==\s*Ovid::Action::"([^"]+)"/);
-      if (singleMatch) {
-        actions = [singleMatch[1]];
+    // Sniff: does this block have an explicit `action` constraint at all?
+    // A bare `action` (no `==` and no `in`) in the head means wildcard.
+    // Anything else with `action` must parse fully or is an error.
+    const hasActionInList = /\baction\s+in\s*\[/.test(block);
+    const hasActionEq = /\baction\s*==/.test(block);
+
+    if (hasActionInList) {
+      const listMatch = block.match(/\baction\s+in\s*\[([^\]]+)\]/);
+      if (listMatch) {
+        const entries = [...listMatch[1].matchAll(/([A-Za-z_][\w]*)::Action::"([^"]+)"/g)];
+        if (entries.length === 0) {
+          // `action in [...]` but nothing that looks like a namespaced action
+          // inside. Refuse to silently treat as wildcard.
+          allErrors.push({
+            line: lineNumFor(cedarText, block),
+            message: 'action in [...] clause contains no recognized <Namespace>::Action::"..." entries',
+            unsupportedFeature: 'malformed action list',
+          });
+          if (strict) continue;
+          // non-strict: treat as deny-everything (empty allow list)
+          actions = [];
+        } else {
+          actions = entries.map(m => m[2]);
+          for (const m of entries) {
+            if (!actionNamespaces.includes(m[1])) actionNamespaces.push(m[1]);
+          }
+        }
       }
-      // else: wildcard (action with no constraint)
+    } else if (hasActionEq) {
+      const singleMatch = block.match(/\baction\s*==\s*([A-Za-z_][\w]*)::Action::"([^"]+)"/);
+      if (singleMatch) {
+        actions = [singleMatch[2]];
+        actionNamespaces.push(singleMatch[1]);
+      } else {
+        // `action ==` but the right-hand side isn't a <Namespace>::Action::"X".
+        // Unknown shape — refuse to interpret as wildcard.
+        allErrors.push({
+          line: lineNumFor(cedarText, block),
+          message: 'action == clause RHS is not a recognized <Namespace>::Action::"..."',
+          unsupportedFeature: 'malformed action equality',
+        });
+        if (strict) continue;
+        actions = [];
+      }
     }
+    // else: no `action` constraint at all — true wildcard.
 
     // Extract resource glob from when clause
     let resourceGlob: string | null = null;
@@ -219,7 +268,7 @@ export function parsePolicies(cedarText: string, options?: ParseOptions): Parsed
       resourceGlob = whenMatch[1];
     }
 
-    policies.push({ effect, actions, resourceGlob, raw: block.trim() });
+    policies.push({ effect, actions, resourceGlob, actionNamespaces, raw: block.trim() });
   }
 
   if (strict && allErrors.length > 0) {
@@ -244,6 +293,17 @@ export class UnsupportedCedarSyntaxError extends Error {
     this.name = 'UnsupportedCedarSyntaxError';
     this.errors = errors;
   }
+}
+
+/** Best-effort line number of `block` within `cedarText` (1-indexed). */
+function lineNumFor(cedarText: string, block: string): number {
+  const idx = cedarText.indexOf(block);
+  if (idx < 0) return 1;
+  let line = 1;
+  for (let i = 0; i < idx; i++) {
+    if (cedarText.charCodeAt(i) === 10) line++;
+  }
+  return line;
 }
 
 /**

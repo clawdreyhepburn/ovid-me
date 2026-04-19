@@ -70,13 +70,25 @@ export function getWasmLoadError(): string | null {
 }
 
 /**
- * Extract all action names referenced in Cedar policy text.
- * Scans for Ovid::Action::"..." patterns and includes base actions.
+ * Detect the namespace used for actions in the policy. Returns the first
+ * <Namespace> found in a <Namespace>::Action::"..." pattern, or falls
+ * back to 'Ovid'. Policies using a mix of namespaces will use whichever
+ * appears first (this is uncommon; Cedar schemas are per-namespace).
+ */
+function detectNamespace(cedarText: string): string {
+  const match = cedarText.match(/\b([A-Za-z_][\w]*)::Action::"/);
+  return match ? match[1] : 'Ovid';
+}
+
+/**
+ * Extract all action names referenced in Cedar policy text, regardless
+ * of namespace. Always includes a handful of base actions so that an
+ * empty-policy (or policy missing actions) still has a workable schema.
  */
 function extractActions(cedarText: string): string[] {
-  const matches = [...cedarText.matchAll(/Ovid::Action::"([^"]+)"/g)];
+  const matches = [...cedarText.matchAll(/[A-Za-z_][\w]*::Action::"([^"]+)"/g)];
   const actions = new Set(matches.map(m => m[1]));
-  // Always include base actions
+  // Always include base actions so the runtime request.action is in schema.
   actions.add('read_file');
   actions.add('write_file');
   actions.add('exec');
@@ -87,9 +99,22 @@ function extractActions(cedarText: string): string[] {
  * Build a Cedarling policy store from Cedar policy text for the Ovid namespace.
  * Dynamically generates schema actions from the policy text.
  */
-function buildPolicyStore(cedarText: string, requestAction?: string): any {
+/**
+ * Build a Cedarling policy store + schema for the detected namespace.
+ *
+ * The schema root key, principal entity type, and resource entity type
+ * all use whatever namespace the policy declares (e.g. 'Ovid', 'Jans').
+ * Historical bug: the schema was hardcoded to 'Ovid' which caused
+ * Jans::-namespaced policies to either error or be silently ignored
+ * by Cedarling.
+ */
+function buildPolicyStore(
+  cedarText: string,
+  namespace: string,
+  requestAction?: string,
+): any {
   const actionNames = extractActions(cedarText);
-  // Also include the request action (it must be in the schema even if not in policy)
+  // Also include the request action (it must be in the schema even if not in policy).
   if (requestAction && !actionNames.includes(requestAction)) {
     actionNames.push(requestAction);
   }
@@ -105,28 +130,27 @@ function buildPolicyStore(cedarText: string, requestAction?: string): any {
     };
   }
 
-  const schema = {
-    Ovid: {
-      entityTypes: {
-        Agent: {
-          shape: {
-            type: 'Record',
-            attributes: {
-              name: { type: 'EntityOrCommon', name: 'String', required: false },
-            },
-          },
-        },
-        Resource: {
-          shape: {
-            type: 'Record',
-            attributes: {
-              path: { type: 'EntityOrCommon', name: 'String', required: false },
-            },
+  const schema: Record<string, any> = {};
+  schema[namespace] = {
+    entityTypes: {
+      Agent: {
+        shape: {
+          type: 'Record',
+          attributes: {
+            name: { type: 'EntityOrCommon', name: 'String', required: false },
           },
         },
       },
-      actions,
+      Resource: {
+        shape: {
+          type: 'Record',
+          attributes: {
+            path: { type: 'EntityOrCommon', name: 'String', required: false },
+          },
+        },
+      },
     },
+    actions,
   };
 
   const policies: Record<string, any> = {
@@ -165,7 +189,10 @@ export async function evaluateWithWasm(
   if (!wasm) return null;
 
   try {
-    const policyStore = buildPolicyStore(cedarText, request.action);
+    const namespace = detectNamespace(cedarText);
+    const agentType = `${namespace}::Agent`;
+    const resourceType = `${namespace}::Resource`;
+    const policyStore = buildPolicyStore(cedarText, namespace, request.action);
     const config = {
       CEDARLING_APPLICATION_NAME: 'OVID',
       CEDARLING_POLICY_STORE_LOCAL: JSON.stringify(policyStore),
@@ -175,9 +202,9 @@ export async function evaluateWithWasm(
       CEDARLING_JWT_SIG_VALIDATION: 'disabled',
       CEDARLING_JWT_SIGNATURE_ALGORITHMS_SUPPORTED: ['ES256'],
       CEDARLING_ID_TOKEN_TRUST_MODE: 'strict',
-      CEDARLING_MAPPING_WORKLOAD: 'Ovid::Agent',
+      CEDARLING_MAPPING_WORKLOAD: agentType,
       CEDARLING_PRINCIPAL_BOOLEAN_OPERATION: {
-        or: [{ '===': [{ var: 'Ovid::Agent' }, 'ALLOW'] }],
+        or: [{ '===': [{ var: agentType }, 'ALLOW'] }],
       },
     };
 
@@ -187,16 +214,16 @@ export async function evaluateWithWasm(
       principals: [
         {
           cedar_entity_mapping: {
-            entity_type: 'Ovid::Agent',
+            entity_type: agentType,
             id: agentJti,
           },
           name: agentJti,
         },
       ],
-      action: `Ovid::Action::"${request.action}"`,
+      action: `${namespace}::Action::"${request.action}"`,
       resource: {
         cedar_entity_mapping: {
-          entity_type: 'Ovid::Resource',
+          entity_type: resourceType,
           id: request.resource,
         },
         path: request.resource,
@@ -225,7 +252,14 @@ export async function evaluateWithWasm(
 
     return { decision: decision as 'allow' | 'deny', reasons };
   } catch (err: any) {
-    // WASM evaluation failed — return null so caller falls back
+    // Surface WASM errors when OVID_WASM_DEBUG=1 — otherwise the whole WASM
+    // path can silently return null and fall back to the string matcher,
+    // which can mask real integration regressions (e.g. Cedarling schema
+    // format changes).
+    if (process.env.OVID_WASM_DEBUG) {
+      // eslint-disable-next-line no-console
+      console.error('[ovid:wasm] evaluation failed:', err?.message ?? err);
+    }
     return null;
   }
 }
