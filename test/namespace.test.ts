@@ -123,6 +123,77 @@ describe('namespace-agnostic action parsing (finding #6 regression)', () => {
     expect(denyResult.engine).toBe('wasm');
   });
 
+  it('CRITICAL: accepts BARE Action::"X" (Carapace deployments use this form)', () => {
+    // Real Carapace policies look like:
+    //   forbid(principal, action == Action::"exec_command", resource == Shell::"rm");
+    // The fallback parser MUST accept bare Action::"..." without a namespace
+    // prefix. Before 2026-04-19 it only accepted <Namespace>::Action::"X"
+    // and silently rejected bare Action as malformed, which caused real
+    // Carapace policies to produce parse errors.
+    const policies = parsePolicies(
+      'forbid(principal, action == Action::"exec_command", resource);',
+    );
+    expect(policies).toHaveLength(1);
+    expect(policies[0].effect).toBe('forbid');
+    expect(policies[0].actions).toEqual(['exec_command']);
+    expect(policies[0].actionNamespaces).toEqual(['']);
+  });
+
+  it('parses bare Action::"X" in an action list', () => {
+    const policies = parsePolicies(
+      'permit(principal, action in [Action::"read_file", Action::"write_file"], resource);',
+    );
+    expect(policies).toHaveLength(1);
+    expect(policies[0].actions).toEqual(['read_file', 'write_file']);
+    expect(policies[0].actionNamespaces).toEqual(['']);
+  });
+
+  it('mixes bare and namespaced Action entries', () => {
+    const policies = parsePolicies(
+      'permit(principal, action in [Action::"a", Jans::Action::"b"], resource);',
+    );
+    expect(policies).toHaveLength(1);
+    expect(policies[0].actions).toEqual(['a', 'b']);
+    expect(policies[0].actionNamespaces.sort()).toEqual(['', 'Jans']);
+  });
+
+  it('evaluates bare Action:: correctly (not wildcard)', () => {
+    const cedar = 'forbid(principal, action == Action::"exec_command", resource);';
+    // The forbid should apply only to exec_command, not every action.
+    const exec = evaluateMandate(cedar, { action: 'exec_command', resource: '/x' });
+    expect(exec.decision).toBe('deny');
+    const other = evaluateMandate(cedar, { action: 'read_file', resource: '/x' });
+    // No permit — default deny.
+    expect(other.decision).toBe('deny');
+  });
+
+  it('WASM handles multi-statement Cedar text (Carapace layout)', async () => {
+    if (!(await isWasmAvailable())) return;
+    // Two statements concatenated (which is how CarapacePolicySource returns
+    // the deployment policy). Cedarling's policy_content decoder expects
+    // ONE statement per entry, so the engine splits on permit/forbid
+    // boundaries before submitting.
+    const cedar =
+      'permit(principal, action, resource);\n' +
+      'forbid(principal, action == Action::"exec_command", resource);';
+
+    // forbid overrides permit: exec_command denied
+    const denyResult = await evaluateMandateAsync(cedar, 'agent-1', {
+      action: 'exec_command',
+      resource: '/bin/ls',
+    }, 'wasm');
+    expect(denyResult.engine).toBe('wasm');
+    expect(denyResult.decision).toBe('deny');
+
+    // Other actions flow through the wildcard permit
+    const allowResult = await evaluateMandateAsync(cedar, 'agent-1', {
+      action: 'read_file',
+      resource: '/foo',
+    }, 'wasm');
+    expect(allowResult.engine).toBe('wasm');
+    expect(allowResult.decision).toBe('allow');
+  });
+
   it('tracks all namespaces seen in a mixed policy', () => {
     const policies = parsePolicies(
       'permit(principal, action in [Jans::Action::"a", Ovid::Action::"b", Jans::Action::"c"], resource);',

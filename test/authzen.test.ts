@@ -114,7 +114,11 @@ describe('AuthZEN Server - Permit Policy', () => {
     const { status, body } = await get(port, '/');
     expect(status).toBe(200);
     expect(body.implementation).toBe('OVID-ME AuthZEN PDP');
-    expect(body.version).toBe('0.2.0');
+    // Version mirrors package.json via src/version.ts; should never be
+    // a stale literal. This assertion imports the constant rather than
+    // hardcoding the current value so future releases don't trip it.
+    const { OVID_ME_VERSION } = await import('../src/version.js');
+    expect(body.version).toBe(OVID_ME_VERSION);
     expect(body.spec_version).toBe('1.0');
   });
 

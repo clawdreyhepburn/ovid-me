@@ -71,9 +71,11 @@ export function getWasmLoadError(): string | null {
 
 /**
  * Detect the namespace used for actions in the policy. Returns the first
- * <Namespace> found in a <Namespace>::Action::"..." pattern, or falls
- * back to 'Ovid'. Policies using a mix of namespaces will use whichever
- * appears first (this is uncommon; Cedar schemas are per-namespace).
+ * <Namespace> found in a <Namespace>::Action::"..." pattern, or 'Ovid'
+ * if no namespace prefix is present (bare `Action::"X"` form used by
+ * Carapace deployments). Policies using a mix of namespaces will use
+ * whichever appears first (this is uncommon; Cedar schemas are per-
+ * namespace).
  */
 function detectNamespace(cedarText: string): string {
   const match = cedarText.match(/\b([A-Za-z_][\w]*)::Action::"/);
@@ -82,11 +84,12 @@ function detectNamespace(cedarText: string): string {
 
 /**
  * Extract all action names referenced in Cedar policy text, regardless
- * of namespace. Always includes a handful of base actions so that an
- * empty-policy (or policy missing actions) still has a workable schema.
+ * of namespace. Accepts both `Foo::Action::"X"` and bare `Action::"X"`.
+ * Always includes a handful of base actions so that an empty-policy
+ * (or policy missing actions) still has a workable schema.
  */
 function extractActions(cedarText: string): string[] {
-  const matches = [...cedarText.matchAll(/[A-Za-z_][\w]*::Action::"([^"]+)"/g)];
+  const matches = [...cedarText.matchAll(/(?:[A-Za-z_][\w]*::)?Action::"([^"]+)"/g)];
   const actions = new Set(matches.map(m => m[1]));
   // Always include base actions so the runtime request.action is in schema.
   actions.add('read_file');
@@ -153,13 +156,31 @@ function buildPolicyStore(
     actions,
   };
 
-  const policies: Record<string, any> = {
-    mandate: {
-      description: 'OVID mandate policy',
+  // Cedarling's policy_content decoder expects ONE Cedar statement per
+  // policy entry. Multi-statement policy text (e.g. a permit + a forbid
+  // concatenated together, which is common in Carapace deployments)
+  // will fail to decode if we submit it as a single blob. Split on
+  // top-level `permit(` / `forbid(` boundaries and submit each as its
+  // own entry under a deterministic id.
+  const statements = cedarText.match(/(?:permit|forbid)\s*\([^;]*;/gs) ?? [];
+  const policies: Record<string, any> = {};
+  if (statements.length === 0) {
+    // Empty or malformed policy text. Submit an empty policy so the
+    // evaluator runs cleanly (and denies by default).
+    policies.mandate = {
+      description: 'OVID mandate policy (empty)',
       creation_date: new Date().toISOString(),
-      policy_content: Buffer.from(cedarText).toString('base64'),
-    },
-  };
+      policy_content: Buffer.from('').toString('base64'),
+    };
+  } else {
+    statements.forEach((stmt, idx) => {
+      policies[`mandate_${idx}`] = {
+        description: `OVID mandate policy #${idx}`,
+        creation_date: new Date().toISOString(),
+        policy_content: Buffer.from(stmt.trim()).toString('base64'),
+      };
+    });
+  }
 
   return {
     cedar_version: 'v4.0.0',

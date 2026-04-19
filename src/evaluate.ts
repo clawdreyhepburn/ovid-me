@@ -223,13 +223,13 @@ export function parsePolicies(cedarText: string, options?: ParseOptions): Parsed
     if (hasActionInList) {
       const listMatch = block.match(/\baction\s+in\s*\[([^\]]+)\]/);
       if (listMatch) {
-        const entries = [...listMatch[1].matchAll(/([A-Za-z_][\w]*)::Action::"([^"]+)"/g)];
+        const entries = [...listMatch[1].matchAll(/(?:([A-Za-z_][\w]*)::)?Action::"([^"]+)"/g)];
         if (entries.length === 0) {
           // `action in [...]` but nothing that looks like a namespaced action
           // inside. Refuse to silently treat as wildcard.
           allErrors.push({
             line: lineNumFor(cedarText, block),
-            message: 'action in [...] clause contains no recognized <Namespace>::Action::"..." entries',
+            message: 'action in [...] clause contains no recognized Action::"..." entries',
             unsupportedFeature: 'malformed action list',
           });
           if (strict) continue;
@@ -238,21 +238,22 @@ export function parsePolicies(cedarText: string, options?: ParseOptions): Parsed
         } else {
           actions = entries.map(m => m[2]);
           for (const m of entries) {
-            if (!actionNamespaces.includes(m[1])) actionNamespaces.push(m[1]);
+            const ns = m[1] ?? '';
+            if (!actionNamespaces.includes(ns)) actionNamespaces.push(ns);
           }
         }
       }
     } else if (hasActionEq) {
-      const singleMatch = block.match(/\baction\s*==\s*([A-Za-z_][\w]*)::Action::"([^"]+)"/);
+      const singleMatch = block.match(/\baction\s*==\s*(?:([A-Za-z_][\w]*)::)?Action::"([^"]+)"/);
       if (singleMatch) {
         actions = [singleMatch[2]];
-        actionNamespaces.push(singleMatch[1]);
+        actionNamespaces.push(singleMatch[1] ?? '');
       } else {
         // `action ==` but the right-hand side isn't a <Namespace>::Action::"X".
         // Unknown shape — refuse to interpret as wildcard.
         allErrors.push({
           line: lineNumFor(cedarText, block),
-          message: 'action == clause RHS is not a recognized <Namespace>::Action::"..."',
+          message: 'action == clause RHS is not a recognized Action::"..."',
           unsupportedFeature: 'malformed action equality',
         });
         if (strict) continue;
