@@ -219,14 +219,20 @@ describe('Integration: OVID + OVID-ME + Carapace', () => {
       },
     });
 
-    // Verify parent chain (now inside authorization_details)
+    // v0.4.0: parent_chain is a ChainLink[] with [root_link, child_link].
+    // Was a string[] with just [root.sub] in v0.3.x.
     const childDetail = childToken.claims.authorization_details[0];
-    expect(childDetail.parent_chain!.length).toBe(1);
-    expect(childDetail.parent_chain![0]).toBe(rootToken.claims.sub);
+    const chain = childDetail.parent_chain as any[];
+    expect(chain.length).toBe(2);
+    expect(chain[0].sub).toBe(rootToken.claims.sub);
+    expect(chain[1].sub).toBe(childToken.claims.sub);
     expect(childToken.claims.parent_ovid).toBe(rootToken.claims.jti);
 
-    // Verify child token with root's public key (signed by root's agent keys)
-    const childResult = await verifyOvid(childToken.jwt, rootToken.keys.publicKey);
+    // Verify the child token. Preferred: options form with trustedRoots.
+    // The root's public key is the trust anchor for the whole chain.
+    const childResult = await verifyOvid(childToken.jwt, {
+      trustedRoots: [rootKeys.publicKey],
+    });
     expect(childResult.valid).toBe(true);
 
     // Child mandate allows read_file

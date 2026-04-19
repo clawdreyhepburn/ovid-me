@@ -79,6 +79,29 @@ export interface OvidConfig {
   /** Timeout for subset proof computation (ms). 0 = no timeout. */
   proofTimeoutMs: number
 
+  /**
+   * Behavior when the SMT subset prover is unavailable (binary missing,
+   * timed out, or errored). The historical `String.includes` fallback was
+   * UNSOUND and has been removed.
+   *
+   * - "off"         — (default) return proven: false with a clear reason.
+   *                   Fail closed; do not guess.
+   * - "exact"       — accept only when child === parent after trim().
+   *                   Reflexive-only; trivially sound.
+   * - "normalized"  — accept when child and parent are equal after
+   *                   stripping comments, collapsing whitespace, and
+   *                   sorting statements. Still reflexive-only; tolerates
+   *                   cosmetic differences.
+   *
+   * None of these are subset proofs for strict-subset cases (child has
+   * fewer permissions than parent). Only the SMT prover can establish
+   * those. The structural fallbacks are useful when (a) policies are
+   * expected to be identical at delegation time (pass-through mandates),
+   * or (b) the prover is temporarily unavailable and you want a degraded
+   * mode that is at least sound.
+   */
+  structuralFallback: 'off' | 'exact' | 'normalized'
+
   // ── Enforcement ───────────────────────────────────────────────
 
   /**
@@ -140,6 +163,7 @@ export const DEFAULT_CONFIG: OvidConfig = {
   subsetProof: 'off',
   proofFailure: 'deny',
   proofTimeoutMs: 5000,
+  structuralFallback: 'off',
   enforcementFailure: 'closed',
   defaultTtl: 1800,
   maxTtl: 86400,
@@ -192,6 +216,9 @@ function applyEnvOverrides(config: OvidConfig): OvidConfig {
   }
   if (env.OVID_PROOF_FAILURE && config.proofFailure === DEFAULT_CONFIG.proofFailure) {
     config.proofFailure = env.OVID_PROOF_FAILURE as OvidConfig['proofFailure']
+  }
+  if (env.OVID_STRUCTURAL_FALLBACK && config.structuralFallback === DEFAULT_CONFIG.structuralFallback) {
+    config.structuralFallback = env.OVID_STRUCTURAL_FALLBACK as OvidConfig['structuralFallback']
   }
   if (env.OVID_ENFORCEMENT_FAILURE && config.enforcementFailure === DEFAULT_CONFIG.enforcementFailure) {
     config.enforcementFailure = env.OVID_ENFORCEMENT_FAILURE as OvidConfig['enforcementFailure']

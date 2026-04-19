@@ -17,6 +17,7 @@ import { evaluateMandate, evaluateMandateAsync } from './evaluate.js';
 import { resolveConfig } from './config.js';
 import { AuditLogger } from './audit.js';
 import { proveSubset, proverBinaryExists } from './subset-prover.js';
+import { exactMatch, normalizedMatch } from './subset-structural.js';
 
 export class MandateEngine {
   private config: OvidConfig;
@@ -90,45 +91,92 @@ export class MandateEngine {
     return result;
   }
 
+  /**
+   * Verify that `mandate.policySet` is a subset of `parentPrincipal`'s
+   * effective policy at this moment in time.
+   *
+   * Proof strategy, in order:
+   *   1. SMT prover (`agent-authz-prover`): sound and complete for the
+   *      Cedar fragments it supports.
+   *   2. Structural fallback, iff `config.structuralFallback !== 'off'`:
+   *      reflexive-only check (exact or normalized). Sound but incomplete.
+   *   3. Otherwise: return `proven: false` with a descriptive reason.
+   *      **Fail closed.** We do NOT use `String.includes` or any other
+   *      substring heuristic; those are unsound as subset proofs.
+   *
+   * The returned `method` field names which strategy succeeded (or failed),
+   * so callers and auditors can tell SMT-proven subsets apart from
+   * reflexive-only matches.
+   */
   async verifySubset(
     mandate: CedarMandate,
     parentPrincipal: string,
-  ): Promise<{ proven: boolean; reason?: string }> {
+  ): Promise<{
+    proven: boolean;
+    reason?: string;
+    method?: 'smt' | 'structural-exact' | 'structural-normalized' | 'none';
+  }> {
     if (this.config.subsetProof === 'off') {
-      return { proven: true };
+      return { proven: true, method: 'none' };
     }
 
     if (!this.config.policySource) {
-      return { proven: false, reason: 'no policy source configured' };
+      return { proven: false, reason: 'no policy source configured', method: 'none' };
     }
 
     const parentPolicy = await this.config.policySource.getEffectivePolicy(parentPrincipal);
-    if (!parentPolicy) {
-      return { proven: false, reason: `no effective policy for principal: ${parentPrincipal}` };
+    if (parentPolicy === null) {
+      return {
+        proven: false,
+        reason: `no effective policy for principal: ${parentPrincipal}`,
+        method: 'none',
+      };
     }
 
-    const childText = mandate.policySet.trim();
+    const childText = mandate.policySet;
 
-    // Try SMT prover first if binary exists
+    // 1. SMT prover (sound + complete within its supported fragment).
+    let smtInconclusiveReason: string | undefined;
     if (proverBinaryExists()) {
       const proofResult = await proveSubset(parentPolicy, childText, {
         timeoutMs: this.config.proofTimeoutMs,
       });
       if (proofResult.proven) {
-        return { proven: true };
+        return { proven: true, method: 'smt' };
       }
-      // If prover ran but couldn't prove, fall through to structural comparison
-      // (prover might not support --parent/--child args yet)
+      smtInconclusiveReason = proofResult.reason;
+    } else {
+      smtInconclusiveReason = 'prover binary not found';
     }
 
-    // Structural comparison fallback: exact substring match
-    if (parentPolicy.includes(childText)) {
-      return { proven: true };
+    // 2. Structural fallback (reflexive-only, sound but very limited).
+    switch (this.config.structuralFallback) {
+      case 'exact':
+        if (exactMatch(parentPolicy, childText)) {
+          return { proven: true, method: 'structural-exact' };
+        }
+        break;
+      case 'normalized':
+        if (normalizedMatch(parentPolicy, childText)) {
+          return { proven: true, method: 'structural-normalized' };
+        }
+        break;
+      case 'off':
+        // No fallback permitted; SMT result (or its absence) is final.
+        break;
     }
 
+    // 3. Fail closed. The child policy is NOT provably a subset.
+    const base = smtInconclusiveReason
+      ? `SMT prover inconclusive (${smtInconclusiveReason})`
+      : 'SMT prover unavailable';
+    const fallbackNote = this.config.structuralFallback === 'off'
+      ? '; structural fallback disabled (sound default)'
+      : `; reflexive ${this.config.structuralFallback} match also failed`;
     return {
       proven: false,
-      reason: 'structural subset proof inconclusive',
+      reason: base + fallbackNote,
+      method: 'none',
     };
   }
 }

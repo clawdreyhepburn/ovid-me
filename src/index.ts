@@ -14,6 +14,7 @@ export { evaluateMandate, evaluateMandateAsync } from './evaluate.js';
 export { evaluateWithWasm, isWasmAvailable } from './cedar-engine-wasm.js';
 export { proveSubset, proverBinaryExists } from './subset-prover.js';
 export type { SubsetProofResult } from './subset-prover.js';
+export { exactMatch, normalize, normalizedMatch } from './subset-structural.js';
 export { MandateEngine } from './mandate-engine.js';
 export type { AuthZenSubject, AuthZenAction, AuthZenResource, AuthZenRequest, AuthZenResponse, AuthZenBatchRequest, AuthZenBatchResponse, AuthZenBatchOptions } from './authzen.js';
 export { authzenToEvaluateRequest, evaluateResultToAuthzen, validateAuthZenRequest } from './authzen.js';
