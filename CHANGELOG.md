@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.3.1] - 2026-04-19
+
+Follow-up patches after end-to-end testing against real Carapace `.cedar`
+policy files uncovered two regressions in the 0.3.0 parser/WASM work.
+
+### Fixed
+- **Bare `Action::"X"` now parses.** Real Carapace policies use the bare
+  form (`forbid(principal, action == Action::"exec_command", resource);`)
+  with no namespace prefix. The namespace-agnostic parser from 0.3.0
+  required at least one `Namespace::Action::"X"` and rejected bare
+  Action literals as malformed action clauses. Now accepts
+  `(?:<Namespace>::)?Action::"X"` and records `''` on
+  `actionNamespaces` when no prefix is present.
+- **WASM handles multi-statement policy blobs.** Cedarling's
+  `policy_content` decoder expects one Cedar statement per policy
+  entry. `CarapacePolicySource.getEffectivePolicy()` returns the
+  concatenation of all `.cedar` files, which is virtually always
+  multi-statement. WASM was returning `null` on every real deployment.
+  `buildPolicyStore()` now splits on top-level `permit(`/`forbid(`
+  boundaries and submits each as a separate policy entry.
+- **Stale hardcoded version in authzen test.** The test asserted
+  `body.version === '0.2.0'`; now imports `OVID_ME_VERSION` from
+  `src/version.ts` so future releases don't trip it.
+
+### Known limitation
+Carapace's Cedar vocabulary uses custom entity types like `Shell` that
+do not match OVID-ME's synthesized `<namespace>::Resource` schema.
+Full Carapace-policy evaluation through WASM still needs a
+schema-compat layer; tracked as a separate piece of work. The fallback
+parser explicitly rejects `resource == <Type>::".."` clauses today.
+
 ## [0.3.0] - 2026-04-19
 
 Security-hardening release. Closes findings #3, #4, #6, #8, #9, #10,
