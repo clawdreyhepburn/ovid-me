@@ -116,9 +116,17 @@ describe('strict parsing — unsupported Cedar syntax', () => {
     expect(result.reason).toContain('principal_equality');
   });
 
-  it('rejects resource == constraints in strict mode', () => {
+  it('ACCEPTS resource == constraints (formerly rejected)', () => {
+    // Pre-2026-04-19 `resource ==` was rejected as unsupported. It is now
+    // parsed into ParsedPolicy.resourceEqualities and honored by the
+    // fallback matcher. This regression test makes sure we don't re-add
+    // the rejection by accident.
     const cedar = `permit(principal, action == Ovid::Action::"read_file", resource == Ovid::Resource::"config");`;
-    expect(() => parsePolicies(cedar)).toThrow(UnsupportedCedarSyntaxError);
+    const policies = parsePolicies(cedar);
+    expect(policies).toHaveLength(1);
+    expect(policies[0].resourceEqualities).toEqual([
+      { type: 'Ovid::Resource', id: 'config' },
+    ]);
   });
 
   it('rejects has operator in strict mode', () => {

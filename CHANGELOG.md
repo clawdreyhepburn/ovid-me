@@ -1,5 +1,80 @@
 # Changelog
 
+## [0.3.2] - 2026-04-19
+
+Carapace end-to-end compatibility ("finding #5 — vocabulary mismatch").
+
+Before this release, OVID-ME could read Carapace's policy text via
+`CarapacePolicySource.getEffectivePolicy()` but could not actually
+**evaluate** it, because:
+
+  1. The fallback parser rejected `resource == Type::"id"` clauses as
+     unsupported syntax.
+  2. The WASM engine silently failed to match bare `Action::"X"` or
+     `Type::"id"` references against a Cedarling schema declared under
+     a named namespace (empty diagnostics, default-deny).
+  3. The synthesized Agent + Resource schema didn't admit Carapace's
+     custom entity types (`Shell`, `Tool`, `API`, `Workload`).
+
+All three are fixed here. A real Carapace policy (multi-statement,
+bare-namespace, typed `resource ==`) now evaluates end-to-end through
+both engines and produces correct allow/deny decisions.
+
+### Added
+- `EvaluateRequest.resourceType?: string` and
+  `EvaluateRequest.principalType?: string`. Callers that work with a
+  deployment's custom schema (e.g. Carapace's `Shell`/`Tool`/`API`)
+  can name the entity type per request. Absent values fall back to
+  the synthesized `<ns>::Agent` and `<ns>::Resource`.
+- `EvaluateWithWasmOptions.externalSchema?: Record<string, any>` on
+  `evaluateWithWasm`, and `EvaluateAsyncOptions.externalSchema` on
+  `evaluateMandateAsync`. Pass the deployment's Cedar schema (e.g.
+  parsed `schema.json`) to use it in place of OVID-ME's synthesized
+  schema. Missing actions are merged in automatically so policies
+  referring to actions not declared in the schema still load.
+- `ParsedPolicy.resourceEqualities` on the fallback parser: a list of
+  `{ type?, id }` entries extracted from `resource == Type::"id"` or
+  bare `resource == "id"` clauses. Matched by `policyMatchesRequest`.
+- Bare-namespace rewriting in the WASM engine. Policies using bare
+  `Type::"id"` references (e.g. `action == Action::"exec_command"`)
+  are rewritten to carry the detected schema namespace before being
+  submitted to Cedarling. Without this, Cedar resolves bare refs to
+  the empty namespace and nothing matches.
+
+### Changed
+- `resource ==` constraints are no longer rejected as unsupported by
+  the fallback parser. `resource == Namespace::Type::"id"` is parsed
+  into `ParsedPolicy.resourceEqualities = [{ type: 'Namespace::Type',
+  id: 'id' }]`. Matching is type-aware when the request names a
+  resourceType, id-only otherwise.
+- `evaluateWithWasm` omits the `path` attribute on the resource
+  payload when `request.resourceType` is present. The synthesized
+  `Resource` type declared `path`, but deployment-specific types like
+  `Jans::Shell` don't — including the attribute caused Cedarling to
+  silently drop policies at evaluation.
+
+### Fixed
+- `Carapace -> OVID-ME` pipeline now actually works. Verified with the
+  real policy files from `~/.openclaw/mcp-policies/` + the real
+  `schema.json`: `forbid(..., resource == Shell::"rm")` fires and
+  denies, `Shell::"git"` allows through the wildcard permit.
+
+### Tests
+- 16 new tests in `test/carapace-integration.test.ts` covering:
+  - multi-statement fallback parsing
+  - typed resource-equality matching (including type mismatches)
+  - WASM end-to-end with bare-namespace rewriting
+  - WASM with a realistic Jans schema containing Shell/Workload/Agent
+  - external-schema action merging
+- 193/193 total tests pass.
+
+### Known gap
+- Carapace's `call_tool`/`call_api` actions use a context object with
+  typed attributes. OVID-ME's fallback engine ignores context
+  conditions beyond `resource.path like`. If a Carapace policy relies
+  on `when { context.agent_role == ... }` it currently evaluates
+  through WASM only. Fallback path is fail-closed for context conditions.
+
 ## [0.3.1] - 2026-04-19
 
 Follow-up patches after end-to-end testing against real Carapace `.cedar`

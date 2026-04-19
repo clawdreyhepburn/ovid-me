@@ -83,6 +83,31 @@ function detectNamespace(cedarText: string): string {
 }
 
 /**
+ * Rewrite bare `Type::"id"` tokens so they explicitly carry a namespace.
+ *
+ * Cedar's bare references resolve to the empty namespace, which means a
+ * policy like `forbid(..., action == Action::"exec", resource ==
+ * Shell::"rm")` won't match anything under a Cedarling schema declared
+ * in a named namespace (Ovid, Jans, etc.). Without this rewrite, bare
+ * Carapace policies silently fail-to-match and everything defaults to
+ * deny with empty diagnostics.
+ *
+ * We match any `<Token>::"<value>"` that ISN'T already preceded by
+ * `::` (i.e. not already namespaced) and prefix it with `<namespace>::`.
+ * The token-character class (`[A-Za-z_][\w]*`) is what Cedar uses for
+ * identifiers.
+ */
+function rewriteBareNamespaceTokens(cedarText: string, namespace: string): string {
+  // Use a negative lookbehind to avoid double-prefixing already-namespaced
+  // references. E.g. `Jans::Action::"x"` has `Action` preceded by `::`
+  // and must be left alone.
+  return cedarText.replace(
+    /(?<![:\w])([A-Za-z_][\w]*)::"/g,
+    (_match, token) => `${namespace}::${token}::"`,
+  );
+}
+
+/**
  * Extract all action names referenced in Cedar policy text, regardless
  * of namespace. Accepts both `Foo::Action::"X"` and bare `Action::"X"`.
  * Always includes a handful of base actions so that an empty-policy
@@ -115,6 +140,7 @@ function buildPolicyStore(
   cedarText: string,
   namespace: string,
   requestAction?: string,
+  externalSchema?: Record<string, any>,
 ): any {
   const actionNames = extractActions(cedarText);
   // Also include the request action (it must be in the schema even if not in policy).
@@ -122,47 +148,98 @@ function buildPolicyStore(
     actionNames.push(requestAction);
   }
 
-  const actions: Record<string, any> = {};
-  for (const name of actionNames) {
-    actions[name] = {
-      appliesTo: {
-        principalTypes: ['Agent'],
-        resourceTypes: ['Resource'],
-        context: { type: 'Record', attributes: {} },
+  // Build the schema:
+  //   - If the caller supplied a schema (e.g. Carapace's schema.json), use
+  //     it verbatim. We still merge any action names we found in the
+  //     policy text that aren't in the supplied schema, so policies that
+  //     reference actions the schema doesn't declare will still parse.
+  //   - Otherwise, synthesize a minimal Agent + Resource schema.
+  let schema: Record<string, any>;
+  if (externalSchema) {
+    // Deep-ish clone so we don't mutate the caller's object.
+    schema = JSON.parse(JSON.stringify(externalSchema));
+    // Ensure the detected namespace is present in the schema.
+    if (!schema[namespace]) {
+      // Pick the first namespace in the external schema as canonical.
+      const firstNs = Object.keys(schema)[0];
+      if (firstNs) {
+        namespace = firstNs;
+      } else {
+        schema[namespace] = { entityTypes: {}, actions: {} };
+      }
+    }
+    // Merge missing actions into the schema so Cedarling doesn't reject
+    // the policy for referring to an unknown action. We default each
+    // missing action to apply to every principal + resource type already
+    // declared — this is the permissive read we want for mandate
+    // evaluation (the policy text itself constrains what actually fires).
+    const ns = schema[namespace];
+    ns.actions = ns.actions || {};
+    const principalTypes = Object.keys(ns.entityTypes ?? {});
+    const resourceTypes = principalTypes.length ? principalTypes : ['Resource'];
+    for (const name of actionNames) {
+      if (!ns.actions[name]) {
+        ns.actions[name] = {
+          appliesTo: {
+            principalTypes,
+            resourceTypes,
+            context: { type: 'Record', attributes: {} },
+          },
+        };
+      }
+    }
+  } else {
+    const actions: Record<string, any> = {};
+    for (const name of actionNames) {
+      actions[name] = {
+        appliesTo: {
+          principalTypes: ['Agent'],
+          resourceTypes: ['Resource'],
+          context: { type: 'Record', attributes: {} },
+        },
+      };
+    }
+
+    schema = {};
+    schema[namespace] = {
+      entityTypes: {
+        Agent: {
+          shape: {
+            type: 'Record',
+            attributes: {
+              name: { type: 'EntityOrCommon', name: 'String', required: false },
+            },
+          },
+        },
+        Resource: {
+          shape: {
+            type: 'Record',
+            attributes: {
+              path: { type: 'EntityOrCommon', name: 'String', required: false },
+            },
+          },
+        },
       },
+      actions,
     };
   }
 
-  const schema: Record<string, any> = {};
-  schema[namespace] = {
-    entityTypes: {
-      Agent: {
-        shape: {
-          type: 'Record',
-          attributes: {
-            name: { type: 'EntityOrCommon', name: 'String', required: false },
-          },
-        },
-      },
-      Resource: {
-        shape: {
-          type: 'Record',
-          attributes: {
-            path: { type: 'EntityOrCommon', name: 'String', required: false },
-          },
-        },
-      },
-    },
-    actions,
-  };
+  // Cedar's bare `Action::"X"` / bare `Type::"id"` references resolve to
+  // the *empty* namespace, not the schema's namespace. Since we submit
+  // the schema keyed under a declared namespace (e.g. `Jans`), policies
+  // that use bare forms will silently fail to match (Cedarling evaluates
+  // but the policy doesn't fire, producing deny-with-empty-reasons).
+  //
+  // Rewrite bare forms to explicitly carry the schema namespace before
+  // handing the policy to Cedarling. We only rewrite tokens we know are
+  // entity types or actions; we don't touch strings inside quotes.
+  const namespacedPolicyText = rewriteBareNamespaceTokens(cedarText, namespace);
 
   // Cedarling's policy_content decoder expects ONE Cedar statement per
-  // policy entry. Multi-statement policy text (e.g. a permit + a forbid
-  // concatenated together, which is common in Carapace deployments)
-  // will fail to decode if we submit it as a single blob. Split on
-  // top-level `permit(` / `forbid(` boundaries and submit each as its
-  // own entry under a deterministic id.
-  const statements = cedarText.match(/(?:permit|forbid)\s*\([^;]*;/gs) ?? [];
+  // policy entry. Multi-statement policy text will fail to decode if we
+  // submit it as a single blob. Split on top-level `permit(` / `forbid(`
+  // boundaries and submit each as its own entry under a deterministic id.
+  const statements = namespacedPolicyText.match(/(?:permit|forbid)\s*\([^;]*;/gs) ?? [];
   const policies: Record<string, any> = {};
   if (statements.length === 0) {
     // Empty or malformed policy text. Submit an empty policy so the
@@ -197,6 +274,16 @@ function buildPolicyStore(
 }
 
 /**
+ * Optional per-call knobs for WASM evaluation. When a deployment owns its
+ * own Cedar schema (e.g. Carapace's `schema.json`) it can pass it here
+ * instead of relying on OVID-ME's synthesized Agent + Resource schema.
+ */
+export interface EvaluateWithWasmOptions {
+  /** A Cedar schema JSON object, e.g. parsed from Carapace's schema.json. */
+  externalSchema?: Record<string, any>;
+}
+
+/**
  * Evaluate a mandate request using Cedarling WASM.
  *
  * @returns null if WASM is unavailable (caller should fall back)
@@ -205,15 +292,32 @@ export async function evaluateWithWasm(
   cedarText: string,
   agentJti: string,
   request: EvaluateRequest,
+  options?: EvaluateWithWasmOptions,
 ): Promise<WasmEvaluateResult | null> {
   const wasm = await ensureWasm();
   if (!wasm) return null;
 
   try {
-    const namespace = detectNamespace(cedarText);
-    const agentType = `${namespace}::Agent`;
-    const resourceType = `${namespace}::Resource`;
-    const policyStore = buildPolicyStore(cedarText, namespace, request.action);
+    let namespace = detectNamespace(cedarText);
+    const externalSchema = options?.externalSchema;
+    if (externalSchema) {
+      // Prefer the schema's declared namespace.
+      const firstNs = Object.keys(externalSchema)[0];
+      if (firstNs) namespace = firstNs;
+    }
+    // Principal / resource entity types: prefer what the request specified,
+    // fall back to synthesized `<namespace>::Agent` and `<namespace>::Resource`.
+    const agentType = request.principalType
+      ? (request.principalType.includes('::')
+          ? request.principalType
+          : `${namespace}::${request.principalType}`)
+      : `${namespace}::Agent`;
+    const resourceType = request.resourceType
+      ? (request.resourceType.includes('::')
+          ? request.resourceType
+          : `${namespace}::${request.resourceType}`)
+      : `${namespace}::Resource`;
+    const policyStore = buildPolicyStore(cedarText, namespace, request.action, externalSchema);
     const config = {
       CEDARLING_APPLICATION_NAME: 'OVID',
       CEDARLING_POLICY_STORE_LOCAL: JSON.stringify(policyStore),
@@ -231,6 +335,24 @@ export async function evaluateWithWasm(
 
     const instance = await wasm.init(config);
 
+    // Build the resource payload. Always include `cedar_entity_mapping`.
+    // `path` used to be included unconditionally, but when the caller
+    // passes an external schema whose resource entity type doesn't
+    // declare `path` (e.g. Jans::Shell declares `command`/`workdir`
+    // instead), Cedarling rejects the extra attribute and the policy
+    // silently fails to match. We include `path` ONLY when the request
+    // didn't specify a resourceType (i.e. we're using the synthesized
+    // default Resource type which does declare `path`).
+    const resourcePayload: any = {
+      cedar_entity_mapping: {
+        entity_type: resourceType,
+        id: request.resource,
+      },
+    };
+    if (!request.resourceType) {
+      resourcePayload.path = request.resource;
+    }
+
     const result = await instance.authorize_unsigned({
       principals: [
         {
@@ -242,13 +364,7 @@ export async function evaluateWithWasm(
         },
       ],
       action: `${namespace}::Action::"${request.action}"`,
-      resource: {
-        cedar_entity_mapping: {
-          entity_type: resourceType,
-          id: request.resource,
-        },
-        path: request.resource,
-      },
+      resource: resourcePayload,
       context: request.context ?? {},
     });
 

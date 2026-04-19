@@ -23,8 +23,23 @@ import { evaluateWithWasm, isWasmAvailable } from './cedar-engine-wasm.js';
 export type EngineMode = 'wasm' | 'fallback' | 'auto';
 
 export interface EvaluateRequest {
+  /** Action name (e.g. 'read_file', 'exec_command'). Namespace is inferred
+   *  from the policy at evaluation time. */
   action: string;
+  /** Resource id. Used both for resource-equality checks (`resource ==
+   *  Type::"<id>"`) and for path-glob checks (`resource.path like ...`). */
   resource: string;
+  /**
+   * Optional Cedar entity type of the resource, e.g. 'Shell', 'Tool', 'API'.
+   * Required when the policy uses `resource == Type::"id"` constraints.
+   * If omitted, the synthesized default is `<namespace>::Resource`.
+   */
+  resourceType?: string;
+  /**
+   * Optional Cedar entity type of the principal, e.g. 'Workload', 'Agent'.
+   * If omitted, the synthesized default is `<namespace>::Agent`.
+   */
+  principalType?: string;
   context?: Record<string, unknown>;
 }
 
@@ -46,6 +61,14 @@ interface ParsedPolicy {
   effect: 'permit' | 'forbid';
   actions: string[] | null; // null = wildcard (matches any)
   resourceGlob: string | null; // null = wildcard
+  /**
+   * List of resource-equality constraints parsed from `resource == <Type>::"<id>"`
+   * or bare `resource == "<id>"` clauses. null means "no resource-equality
+   * constraint" (wildcard); [] means "a constraint was present but unparseable"
+   * (only happens in non-strict mode). Each entry has optional `type` for
+   * entity-type matching.
+   */
+  resourceEqualities: Array<{ type?: string; id: string }> | null;
   actionNamespaces: string[]; // namespaces seen in action clause (e.g. ['Ovid', 'Jans'])
   raw: string;
 }
@@ -83,14 +106,9 @@ function detectUnsupportedFeatures(block: string): ParseError[] {
     });
   }
 
-  // resource == constraint in head
-  if (/resource\s*==\s*/.test(block)) {
-    errors.push({
-      line: lineNum,
-      message: 'resource == constraints are not supported by the fallback engine',
-      unsupportedFeature: 'resource_equality',
-    });
-  }
+  // `resource == <Type>::"<id>"` constraints ARE supported as of the
+  // Carapace-compat work (2026-04-19). No error raised.
+  // See parsePolicies() which extracts the literal into ParsedPolicy.
 
   // has operator
   if (/\bhas\s+\w/.test(block)) {
@@ -269,7 +287,32 @@ export function parsePolicies(cedarText: string, options?: ParseOptions): Parsed
       resourceGlob = whenMatch[1];
     }
 
-    policies.push({ effect, actions, resourceGlob, actionNamespaces, raw: block.trim() });
+    // Parse resource-equality constraints.
+    // Accepts either of:
+    //   resource == <Namespace>::<Type>::"<id>"      (e.g. Ovid::Resource::"config")
+    //   resource == <Type>::"<id>"                   (e.g. Shell::"rm")
+    //   resource == "<id>"                            (bare string)
+    // Multi-segment type paths are preserved verbatim in `type` so
+    // downstream matchers can compare exact Cedar entity-type identifiers.
+    let resourceEqualities: Array<{ type?: string; id: string }> | null = null;
+    if (/\bresource\s*==/.test(block)) {
+      const typedMatch = block.match(/\bresource\s*==\s*((?:[A-Za-z_][\w]*::)+[A-Za-z_][\w]*)::"([^"]+)"/);
+      const simpleTypedMatch = block.match(/\bresource\s*==\s*([A-Za-z_][\w]*)::"([^"]+)"/);
+      const bareMatch = block.match(/\bresource\s*==\s*"([^"]+)"/);
+      if (typedMatch) {
+        resourceEqualities = [{ type: typedMatch[1], id: typedMatch[2] }];
+      } else if (simpleTypedMatch) {
+        resourceEqualities = [{ type: simpleTypedMatch[1], id: simpleTypedMatch[2] }];
+      } else if (bareMatch) {
+        resourceEqualities = [{ id: bareMatch[1] }];
+      } else {
+        // Unknown RHS; treat as an empty constraint list (”matches nothing")
+        // rather than wildcard. Callers are free to reject upstream via
+        // strict mode, but structurally the policy shouldn't fire.
+        resourceEqualities = [];
+      }
+    }
+    policies.push({ effect, actions, resourceGlob, resourceEqualities, actionNamespaces, raw: block.trim() });
   }
 
   if (strict && allErrors.length > 0) {
@@ -328,7 +371,33 @@ function policyMatchesRequest(policy: ParsedPolicy, request: EvaluateRequest): b
   if (policy.resourceGlob !== null && !matchGlob(policy.resourceGlob, request.resource)) {
     return false;
   }
+  // Check resource-equality constraints.
+  // null means "no constraint; wildcard matches any resource".
+  // [] means the constraint existed but was unparseable — matches nothing.
+  // Non-empty: must find a matching entry.
+  if (policy.resourceEqualities !== null) {
+    if (policy.resourceEqualities.length === 0) return false;
+    const found = policy.resourceEqualities.some(eq => {
+      if (eq.id !== request.resource) return false;
+      // When the policy names a type, require the request to name it too.
+      // Requests without `resourceType` are given a free pass on typed
+      // equalities so that deployments migrating piecemeal don't break.
+      if (eq.type && request.resourceType && eq.type !== request.resourceType) {
+        return false;
+      }
+      return true;
+    });
+    if (!found) return false;
+  }
   return true;
+}
+
+/**
+ * Options for the async evaluator.
+ */
+export interface EvaluateAsyncOptions {
+  /** External Cedar schema (e.g. Carapace's schema.json). Passed through to the WASM engine. */
+  externalSchema?: Record<string, any>;
 }
 
 /**
@@ -340,9 +409,12 @@ export async function evaluateMandateAsync(
   agentJti: string,
   request: EvaluateRequest,
   engine: EngineMode = 'auto',
+  options?: EvaluateAsyncOptions,
 ): Promise<{ decision: 'allow' | 'deny'; matchedPolicy?: string; reason?: string; engine: 'wasm' | 'fallback' }> {
   if (engine === 'wasm' || engine === 'auto') {
-    const wasmResult = await evaluateWithWasm(cedarText, agentJti, request);
+    const wasmResult = await evaluateWithWasm(cedarText, agentJti, request, {
+      externalSchema: options?.externalSchema,
+    });
     if (wasmResult) {
       return {
         decision: wasmResult.decision,

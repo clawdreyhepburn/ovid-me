@@ -10,9 +10,10 @@ export { DashboardServer, startDashboard, stopDashboard } from './dashboard-serv
 export { dashboardHtml } from './dashboard-html.js';
 export type { OvidConfig, PolicySource } from './config.js';
 export { DEFAULT_CONFIG, resolveConfig } from './config.js';
-export type { EvaluateRequest, EvaluateResult, EngineMode } from './evaluate.js';
+export type { EvaluateRequest, EvaluateResult, EngineMode, EvaluateAsyncOptions } from './evaluate.js';
 export { evaluateMandate, evaluateMandateAsync } from './evaluate.js';
 export { evaluateWithWasm, isWasmAvailable } from './cedar-engine-wasm.js';
+export type { EvaluateWithWasmOptions } from './cedar-engine-wasm.js';
 export { proveSubset, proverBinaryExists } from './subset-prover.js';
 export type { SubsetProofResult } from './subset-prover.js';
 export { exactMatch, normalize, normalizedMatch } from './subset-structural.js';
