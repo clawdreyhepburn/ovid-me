@@ -1,56 +1,137 @@
+// OVID Cedar Schema — Generic Agent Authorization Vocabulary
+// This is the base schema shipped with @clawdreyhepburn/ovid-me.
+// Instance-specific extensions go in ~/.ovid/schema/Ovid.local.cedarschema.
+
 namespace Ovid {
+
+  // ── Principals ──────────────────────────────────────────────
+
   entity Agent {
     name?: String,
+    issuer?: String,
+    depth?: Long,          // 0 = root, 1 = child, 2 = grandchild...
   };
 
-  entity Resource {
+  // ── Resources (nouns) ──────────────────────────────────────
+
+  entity File {
+    path: String,
+  };
+
+  entity Shell {
+    command: String,
+    args?: String,
+  };
+
+  entity Tool {
+    name: String,
+  };
+
+  entity WebEndpoint {
+    url?: String,
+    hostname?: String,
+  };
+
+  entity Channel {
+    provider: String,      // "telegram", "discord", "signal", "imessage", etc.
+    target?: String,       // chat/channel/group ID
+  };
+
+  entity Memory {
     path?: String,
-    command?: String,
   };
 
-  // Common actions for OVID agent tool calls.
-  // Cedar schemas require all actions to be declared — if your mandate uses
-  // custom actions not listed here, add them to this schema file.
-  // See docs/CEDAR-SUPPORT.md for details.
+  entity Session {
+    key?: String,
+  };
 
-  action "read_file" appliesTo {
+  // ── Actions (verbs) ────────────────────────────────────────
+  //
+  // These are the generic actions any OpenClaw agent might perform.
+  // Each action declares which resource types it applies to.
+
+  // Filesystem
+  action "read" appliesTo {
     principal: [Agent],
-    resource: [Resource],
+    resource: [File, Memory, Tool],
     context: {},
   };
-  action "write_file" appliesTo {
+
+  action "write" appliesTo {
     principal: [Agent],
-    resource: [Resource],
+    resource: [File, Memory],
     context: {},
   };
+
+  action "edit" appliesTo {
+    principal: [Agent],
+    resource: [File],
+    context: {},
+  };
+
+  // Shell execution
   action "exec" appliesTo {
     principal: [Agent],
-    resource: [Resource],
+    resource: [Shell],
     context: {},
   };
-  action "use_tool" appliesTo {
+
+  // Network
+  action "fetch" appliesTo {
     principal: [Agent],
-    resource: [Resource],
+    resource: [WebEndpoint],
     context: {},
   };
-  action "web_fetch" appliesTo {
+
+  action "search" appliesTo {
     principal: [Agent],
-    resource: [Resource],
+    resource: [WebEndpoint, Tool],
     context: {},
   };
-  action "message" appliesTo {
+
+  action "browse" appliesTo {
     principal: [Agent],
-    resource: [Resource],
+    resource: [WebEndpoint],
     context: {},
   };
-  action "spawn_agent" appliesTo {
+
+  // Messaging
+  action "send" appliesTo {
     principal: [Agent],
-    resource: [Resource],
+    resource: [Channel],
     context: {},
   };
-  action "mcp_call" appliesTo {
+
+  // Delegation
+  action "delegate" appliesTo {
     principal: [Agent],
-    resource: [Resource],
+    resource: [Session],
+    context: {},
+  };
+
+  // Memory operations
+  action "remember" appliesTo {
+    principal: [Agent],
+    resource: [Memory],
+    context: {},
+  };
+
+  action "recall" appliesTo {
+    principal: [Agent],
+    resource: [Memory, Tool],
+    context: {},
+  };
+
+  // Generic fallback — used when no specific action matches
+  action "call_tool" appliesTo {
+    principal: [Agent],
+    resource: [Tool],
+    context: {},
+  };
+
+  action "summarize" appliesTo {
+    principal: [Agent],
+    resource: [Tool, File, WebEndpoint],
     context: {},
   };
 }

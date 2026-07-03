@@ -49,6 +49,17 @@ export interface EvaluateResult {
   shadowDecision?: 'allow' | 'deny';
   matchedPolicy?: string;
   reason?: string;
+  /**
+   * Provenance label written to the audit log when the decision is `allow`
+   * and a subset proof was attempted against the parent's effective policy.
+   *   - 'allow-proven'   — SMT (or reflexive structural) subset proof succeeded
+   *   - 'allow-unproven' — allow granted but subset proof was inconclusive/absent
+   * Undefined when no proof was attempted (e.g. deny, or subsetProof off,
+   * or no parent principal supplied). See §4.5 of the SynSec paper.
+   */
+  proofLabel?: 'allow-proven' | 'allow-unproven';
+  /** Which proof strategy produced `proofLabel` (mirrors verifySubset().method). */
+  proofMethod?: 'smt' | 'structural-exact' | 'structural-normalized' | 'none';
 }
 
 export interface ParseError {

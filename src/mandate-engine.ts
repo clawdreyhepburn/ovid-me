@@ -16,6 +16,7 @@ import type { EvaluateRequest, EvaluateResult } from './evaluate.js';
 import { evaluateMandate, evaluateMandateAsync } from './evaluate.js';
 import { resolveConfig } from './config.js';
 import { AuditLogger } from './audit.js';
+import type { DecisionOutcome } from './audit.js';
 import { proveSubset, proverBinaryExists } from './subset-prover.js';
 import { exactMatch, normalizedMatch } from './subset-structural.js';
 
@@ -32,6 +33,14 @@ export class MandateEngine {
     agentJti: string,
     mandate: CedarMandate,
     request: EvaluateRequest,
+    /**
+     * The parent principal whose effective policy this mandate must be a
+     * subset of. When supplied (and `subsetProof !== 'off'`), an `allow`
+     * decision is run through `verifySubset()` and labelled `allow-proven`
+     * or `allow-unproven` in the emitted decision + audit log (§4.5).
+     * Omit for the legacy plain allow/deny behavior.
+     */
+    parentPrincipal?: string,
   ): Promise<EvaluateResult> {
     const mode = this.config.mandateMode;
     const cedarText = mandate.policySet;
@@ -79,12 +88,50 @@ export class MandateEngine {
       }
     }
 
-    // Audit log every evaluation
+    // Attach a proof-provenance label to `allow` decisions (§4.5). This is the
+    // enforcement-path wiring of verifySubset(): previously the allow-proven /
+    // allow-unproven distinction was only ever computed for the dashboard and
+    // never written by evaluate(). Now every allow that we can attribute to a
+    // parent principal is checked against that parent's effective policy via
+    // the SMT prover, and the result rides along on the decision + audit log.
+    //
+    // Preconditions to attempt a proof:
+    //   - the decision is `allow` (deny needs no subset proof),
+    //   - subset proving is enabled (config.subsetProof !== 'off'), and
+    //   - a parent principal was supplied so we know what to prove against.
+    // Modes (enforce/dry-run/shadow) are all preserved: we only *label* the
+    // allow, we never change whether it is an allow.
+    let auditDecision: DecisionOutcome = result.decision;
+    if (
+      result.decision === 'allow' &&
+      this.config.subsetProof !== 'off' &&
+      parentPrincipal !== undefined
+    ) {
+      const proof = await this.verifySubset(mandate, parentPrincipal);
+      result.proofMethod = proof.method;
+      if (proof.proven) {
+        result.proofLabel = 'allow-proven';
+        auditDecision = 'allow-proven';
+      } else {
+        result.proofLabel = 'allow-unproven';
+        auditDecision = 'allow-unproven';
+        // Surface the inconclusive reason without clobbering an existing one.
+        if (proof.reason) {
+          result.reason = result.reason
+            ? `${result.reason}; subset-unproven: ${proof.reason}`
+            : `subset-unproven: ${proof.reason}`;
+        }
+      }
+    }
+
+    // Audit log every evaluation. When a proof label was computed, the audit
+    // record carries the richer allow-proven / allow-unproven outcome so the
+    // provenance is visible to auditors and the dashboard alike.
     this.logger.logDecision(
       agentJti,
       request.action,
       request.resource,
-      result.decision,
+      auditDecision,
       result.matchedPolicy ? [result.matchedPolicy] : undefined,
     );
 
