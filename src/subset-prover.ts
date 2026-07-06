@@ -11,10 +11,29 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 
+/**
+ * A concrete counterexample request produced by cvc5 when a mandate is NOT a
+ * subset of its parent: a request the child policy allows and the parent does
+ * not. Entity references are the Cedar EntityUIDs the solver's model assigned,
+ * e.g. `Ovid::Action::"exec"`, `Ovid::Shell::""`.
+ */
+export interface Counterexample {
+  principal: string;
+  action: string;
+  resource: string;
+}
+
 export interface SubsetProofResult {
   proven: boolean;
   reason?: string;
   durationMs?: number;
+  /**
+   * When `proven` is false and the prover produced a concrete witness, the
+   * counterexample request (child allows, parent denies). Absent when the
+   * violation was detected but no model could be concretized (out-of-fragment
+   * cases), or when `proven` is true.
+   */
+  counterexample?: Counterexample;
 }
 
 const DEFAULT_PROVER_PATH = join(
@@ -99,6 +118,7 @@ function runProver(
       resolve({ proven: false, reason: `prover error: ${err.message}` });
     });
 
+    // (parseCounterexample defined at module scope below)
     proc.on('close', (code: number | null) => {
       if (timer) clearTimeout(timer);
 
@@ -115,6 +135,10 @@ function runProver(
       if (lower.includes('subset: proven') || lower.includes('subset_proven') ||
           (lower.includes('subset') && lower.includes('true') && !lower.includes('error'))) {
         resolve({ proven: true });
+      } else if (lower.includes('subset: not-proven') || lower.includes('subset_not_proven')) {
+        // Genuine non-subset. Extract the concrete counterexample witness the
+        // prover emitted (a `counterexample: {json}` line), if present.
+        resolve({ proven: false, reason: output, counterexample: parseCounterexample(output) });
       } else if (code !== 0 || lower.includes('error') || lower.includes('usage') || lower.includes('unknown')) {
         // Binary doesn't support subset mode or errored
         resolve({
@@ -129,4 +153,110 @@ function runProver(
       }
     });
   });
+}
+
+/**
+ * Parse the `counterexample: {json}` line the Rust prover emits alongside a
+ * `subset: not-proven` verdict. Returns undefined when no witness line is
+ * present (e.g. the violation was detected but no concrete model could be
+ * extracted).
+ */
+export function parseCounterexample(output: string): Counterexample | undefined {
+  const line = output.split('\n').find((l) => l.trim().startsWith('counterexample:'));
+  if (!line) return undefined;
+  const jsonStart = line.indexOf('{');
+  if (jsonStart < 0) return undefined;
+  try {
+    const parsed = JSON.parse(line.slice(jsonStart)) as Partial<Counterexample>;
+    if (
+      typeof parsed.principal === 'string' &&
+      typeof parsed.action === 'string' &&
+      typeof parsed.resource === 'string'
+    ) {
+      return { principal: parsed.principal, action: parsed.action, resource: parsed.resource };
+    }
+  } catch {
+    /* malformed line — treat as no witness */
+  }
+  return undefined;
+}
+
+/**
+ * Concrete re-validation of a counterexample (SynSec §4.4): feed the witness
+ * request back through the Cedar engine against both the child and parent
+ * policies and confirm it reproduces a genuine decision divergence (child
+ * allows, parent does not). This guards against SMT-encoding bugs: a witness
+ * the solver claims is a divergence but that Cedar does NOT actually decide
+ * divergently indicates an encoding fault, and the counterexample is rejected
+ * rather than reported.
+ *
+ * `evaluator` is injected (the caller passes OVID-ME's Cedar evaluator) so this
+ * module stays free of a hard dependency on the WASM engine. Returns:
+ *   - { validated: true }  — Cedar confirms child=allow, parent!=allow
+ *   - { validated: false, reason } — Cedar disagreed (possible encoding bug),
+ *                                    or the engine was unavailable/inconclusive
+ */
+export interface CounterexampleValidation {
+  validated: boolean;
+  reason?: string;
+  childDecision?: 'allow' | 'deny';
+  parentDecision?: 'allow' | 'deny';
+}
+
+export async function revalidateCounterexample(
+  cex: Counterexample,
+  parentPolicy: string,
+  childPolicy: string,
+  evaluator: (
+    policyText: string,
+    req: { action: string; resource: string; resourceType?: string; principalType?: string },
+  ) => Promise<{ decision: 'allow' | 'deny' } | null>,
+): Promise<CounterexampleValidation> {
+  // Parse `Namespace::Type::"id"` EntityUIDs into the fields the evaluator
+  // expects (bare action name, resource id + type, principal type).
+  const parseUid = (uid: string): { type?: string; id: string } => {
+    // e.g. Ovid::Action::"exec"  ->  type "Action", id "exec"
+    //      Ovid::Shell::""       ->  type "Shell",  id ""
+    const m = uid.match(/(?:[A-Za-z_]\w*::)*([A-Za-z_]\w*)::"([^"]*)"$/);
+    if (m) return { type: m[1], id: m[2] };
+    return { id: uid };
+  };
+
+  const action = parseUid(cex.action).id;
+  const res = parseUid(cex.resource);
+  const prin = parseUid(cex.principal);
+  const req = {
+    action,
+    resource: res.id,
+    resourceType: res.type,
+    principalType: prin.type,
+  };
+
+  const childRes = await evaluator(childPolicy, req);
+  const parentRes = await evaluator(parentPolicy, req);
+
+  if (!childRes || !parentRes) {
+    return {
+      validated: false,
+      reason: 'Cedar engine unavailable for counterexample re-validation',
+    };
+  }
+
+  const childDecision = childRes.decision;
+  const parentDecision = parentRes.decision;
+
+  // The witness must reproduce the divergence the solver claimed:
+  // child allows it, parent does not.
+  if (childDecision === 'allow' && parentDecision !== 'allow') {
+    return { validated: true, childDecision, parentDecision };
+  }
+
+  return {
+    validated: false,
+    reason:
+      `Cedar re-evaluation did not reproduce the claimed divergence ` +
+      `(child=${childDecision}, parent=${parentDecision}); possible SMT-encoding fault`,
+    childDecision,
+    parentDecision,
+  };
 }

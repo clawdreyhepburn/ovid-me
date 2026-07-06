@@ -17,7 +17,7 @@ import { evaluateMandate, evaluateMandateAsync } from './evaluate.js';
 import { resolveConfig } from './config.js';
 import { AuditLogger } from './audit.js';
 import type { DecisionOutcome } from './audit.js';
-import { proveSubset, proverBinaryExists } from './subset-prover.js';
+import { proveSubset, proverBinaryExists, revalidateCounterexample } from './subset-prover.js';
 import { exactMatch, normalizedMatch } from './subset-structural.js';
 
 export class MandateEngine {
@@ -192,6 +192,43 @@ export class MandateEngine {
         return { proven: true, method: 'smt' };
       }
       smtInconclusiveReason = proofResult.reason;
+
+      // Concrete counterexample re-validation (SynSec §4.4). When the prover
+      // reports a genuine non-subset with a concrete witness, feed that witness
+      // back through the Cedar engine against both child and parent and confirm
+      // it reproduces the claimed divergence (child allows, parent does not).
+      // A witness the solver claims is a divergence but that Cedar does not
+      // decide divergently signals an SMT-encoding fault; we surface it rather
+      // than trust the solver blindly. Re-validation never turns a non-subset
+      // into a subset — it only annotates the fail-closed reason.
+      if (proofResult.counterexample) {
+        const check = await revalidateCounterexample(
+          proofResult.counterexample,
+          parentPolicy,
+          childText,
+          async (policyText, req) => {
+            // evaluateMandateAsync('auto') uses the full Cedar engine (WASM)
+            // when available and transparently falls back to the structural
+            // evaluator otherwise, so re-validation still runs either way.
+            const res = await evaluateMandateAsync(
+              policyText,
+              'ovid-me-cex-revalidate',
+              req,
+              'auto',
+            );
+            return res ? { decision: res.decision } : null;
+          },
+        );
+        if (check.validated) {
+          smtInconclusiveReason =
+            (smtInconclusiveReason ?? 'not a subset') +
+            `; counterexample re-validated through Cedar (child=${check.childDecision}, parent=${check.parentDecision})`;
+        } else {
+          smtInconclusiveReason =
+            (smtInconclusiveReason ?? 'not a subset') +
+            `; WARNING: counterexample re-validation did not confirm divergence (${check.reason})`;
+        }
+      }
     } else {
       smtInconclusiveReason = 'prover binary not found';
     }
