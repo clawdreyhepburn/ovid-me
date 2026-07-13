@@ -72,11 +72,23 @@ export class AuditDatabase {
     `).run(claims.jti, claims.mandate_summary, claims.iss, JSON.stringify(claims.parent_chain),
       claims.iat, claims.exp, claims.raw_jwt ?? '', depth);
 
-    // Insert chain relationships
-    if (claims.parent_chain.length > 0) {
-      const parentJti = claims.parent_chain[claims.parent_chain.length - 1];
-      this.db.prepare(`INSERT OR IGNORE INTO chains (parent_jti, child_jti) VALUES (?, ?)`)
-        .run(parentJti, claims.jti);
+    // Insert chain relationships. Two callers use two conventions for
+    // parent_chain: (a) ancestors-only [root, ..., parent] (excludes self), and
+    // (b) full ChainLink subject list [root, ..., parent, self] (includes self).
+    // Pick the immediate parent robustly: if the last entry is THIS jti (case b),
+    // the parent is second-to-last; otherwise (case a) the parent is last.
+    // This avoids self-loop edges regardless of which convention the caller uses.
+    const chain = claims.parent_chain;
+    if (chain.length >= 1) {
+      const lastIsSelf = chain[chain.length - 1] === claims.jti;
+      const parentIdx = lastIsSelf ? chain.length - 2 : chain.length - 1;
+      if (parentIdx >= 0) {
+        const parentJti = chain[parentIdx];
+        if (parentJti && parentJti !== claims.jti) {
+          this.db.prepare(`INSERT OR IGNORE INTO chains (parent_jti, child_jti) VALUES (?, ?)`)
+            .run(parentJti, claims.jti);
+        }
+      }
     }
   }
 
