@@ -305,8 +305,16 @@ OVID-ME is informed by and builds on:
 - **[Transaction Tokens (draft-ietf-oauth-transaction-tokens)](https://datatracker.ietf.org/doc/draft-ietf-oauth-transaction-tokens/)** — scope-narrowing across trust domains
 - **[Cedar](https://www.cedarpolicy.com/)** — deterministic, analyzable policy evaluation
 - **[AuthZEN](https://openid.github.io/authzen/)** — interoperable authorization API
-- **[OVID](https://github.com/clawdreyhepburn/ovid)** — cryptographic agent identity (Ed25519 JWTs, delegation chains)
-- **[Carapace](https://github.com/clawdreyhepburn/carapace)** — deployment-level Cedar policy enforcement
+- **[OVID](https://github.com/clawdreyhepburn/ovid)** — cryptographic agent identity (Ed25519 JWTs, delegation chains); the library that issues the badges this one evaluates
+- **[Carapace](https://github.com/clawdreyhepburn/carapace)** — deployment-level Cedar policy enforcement (the human's absolute ceiling)
+
+### The ready-to-use OpenClaw plugins
+
+If you just want this working inside [OpenClaw](https://github.com/openclaw/openclaw) without writing code, install the plugin family rather than the libraries directly:
+
+- **[@clawdreyhepburn/openclaw-ovid](https://github.com/clawdreyhepburn/openclaw-ovid)** — issues a badge to every spawned sub-agent.
+- **[@clawdreyhepburn/openclaw-ovid-me](https://github.com/clawdreyhepburn/openclaw-ovid-me)** — the OpenClaw plugin built on *this* library; enforces those badges at every tool call.
+- **[@clawdreyhepburn/carapace](https://github.com/clawdreyhepburn/carapace)** — the human-set ceiling.
 
 
 ## License

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.3] - 2026-07-13
+
+### Fixed
+- **`AuditDatabase` no longer crashes at module load when the better-sqlite3 native
+  binding is missing.** better-sqlite3 ships a native addon that is built/fetched by an
+  install script. Hosts that install with `npm --ignore-scripts` (which is what OpenClaw's
+  plugin installer does for safety) never get the binding, and the previous top-level
+  `import Database from 'better-sqlite3'` threw at load time — taking down any service that
+  imported this module before a try/catch could run. better-sqlite3 is now loaded lazily
+  inside the `AuditDatabase` constructor via `createRequire` (this package is ESM, so a bare
+  `require` is not defined — that itself was a latent trap). A missing binding now throws a
+  catchable error with `code = 'OVID_SQLITE_UNAVAILABLE'`, letting callers degrade to
+  JSONL-only auditing instead of failing hard. 241/241 tests pass.
+
 ## [0.3.2] - 2026-04-19
 
 Carapace end-to-end compatibility ("finding #5 — vocabulary mismatch").

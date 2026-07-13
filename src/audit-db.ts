@@ -1,14 +1,53 @@
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { createRequire } from 'node:module';
+
+// This package is ESM ("type": "module"), so a bare `require` is not defined in
+// scope. Use createRequire against this module's URL so we can still lazily
+// pull in the CommonJS-only better-sqlite3 native addon.
+const nodeRequire = createRequire(import.meta.url);
+
+/**
+ * Lazily load the better-sqlite3 native module.
+ *
+ * better-sqlite3 ships a native addon that must be compiled or fetched via a
+ * prebuild at install time. When a host installs this package with npm's
+ * `--ignore-scripts` (which is what OpenClaw's plugin installer does for
+ * safety), the binding is never built and a top-level `import` would throw at
+ * module-load time — taking down the entire plugin service before any
+ * try/catch can run.
+ *
+ * By requiring it lazily inside the constructor we turn that into a normal,
+ * catchable runtime error so callers can degrade to JSONL-only auditing
+ * instead of crashing. The thrown error carries a `code` so callers can detect
+ * the "native binding missing" case specifically.
+ */
+function loadBetterSqlite3(): typeof Database {
+  try {
+    const mod = nodeRequire('better-sqlite3');
+    return (mod && mod.default) ? mod.default : mod;
+  } catch (err: any) {
+    const e = new Error(
+      `better-sqlite3 native binding is unavailable — SQLite audit store cannot start. ` +
+      `This usually means the package was installed with --ignore-scripts so the ` +
+      `native addon was never built. Falling back to JSONL-only auditing is recommended. ` +
+      `Original error: ${err?.message ?? String(err)}`,
+    );
+    (e as any).code = 'OVID_SQLITE_UNAVAILABLE';
+    (e as any).cause = err;
+    throw e;
+  }
+}
 
 export class AuditDatabase {
   private db: Database.Database;
 
   constructor(dbPath?: string) {
+    const Database = loadBetterSqlite3();
     const p = dbPath ?? join(homedir(), '.ovid', 'audit.db');
     mkdirSync(dirname(p), { recursive: true });
     this.db = new Database(p);
