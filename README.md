@@ -18,6 +18,27 @@
 
 ---
 
+## New here? Read this first (no background assumed)
+
+**What is this, in one sentence?** OVID-ME is a software library that checks, before an AI helper does anything, whether the helper's **ID badge** actually permits that action — and can allow, log, or block it accordingly.
+
+**The situation it fixes:** When an AI assistant hands part of a job to a smaller **helper program** (a "sub-agent"), that helper usually inherits *all* of the assistant's power — far more than its little task requires. A companion tool, [OVID](https://github.com/clawdreyhepburn/ovid), stamps each helper with a signed **badge** listing exactly what it may do. OVID-ME is the part that **reads that badge and enforces it** on every single action.
+
+**Plain-English glossary for the terms below:**
+
+- **Agent / sub-agent** — an automated AI worker; a sub-agent is a helper spawned by another.
+- **Mandate** — the list of allowed actions written on a helper's badge.
+- **Cedar** — a small, precise permission language (created by Amazon) used to write those rules. You rarely write it by hand when using the OpenClaw plugins.
+- **PDP / policy decision point** — industry term for "the component that answers *is this action allowed?*" That's what this library is.
+- **Subset proof** — a mathematical check that a helper isn't being granted more power than the helper that created it. ("You can't give away more than you have.")
+- **Audit log** — a permanent record of every allow/deny decision, so you can review after the fact.
+
+**The one thing to remember:** this library answers a single question, over and over — *"does this helper's badge permit what it's trying to do right now?"* — and records the answer. If you just want the OpenClaw plugin that wires this in automatically, see **[@clawdreyhepburn/openclaw-ovid-me](https://github.com/clawdreyhepburn/openclaw-ovid-me)**.
+
+The rest of this README is aimed at developers integrating the library directly, and uses more precise terminology (with links to the relevant standards).
+
+---
+
 ## The Problem
 
 Agent delegation is broken.
