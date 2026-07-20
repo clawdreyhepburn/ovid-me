@@ -105,15 +105,18 @@ For critical workflows, use `renewOvid()` programmatically before expiry.
 2. Verify your mandate covers the actions your agent uses (e.g., `read_file`, `write_file`, `exec`, `web_fetch`, `message`)
 3. Remember: Cedar is default-deny. If no permit policy matches, the action is denied
 
-### "WASM engine not found"
+### "WASM engine unavailable" / all denies under engine wasm
 
-Install the optional WASM dependency:
+Native evaluation depends on `@cedar-policy/cedar-wasm` (a hard dependency of
+this package). If install scripts were skipped or the module failed to load:
 
 ```bash
-npm install @janssenproject/cedarling_wasm
+npm install @cedar-policy/cedar-wasm
 ```
 
-Without it, OVID-ME uses the fallback string-matching engine, which supports a subset of Cedar. See [CEDAR-SUPPORT.md](CEDAR-SUPPORT.md) for limitations.
+OVID-ME does **not** silently fall back to the string matcher. Set
+`engine: "fallback"` only if you intentionally want the limited matcher.
+See [CEDAR-SUPPORT.md](CEDAR-SUPPORT.md).
 
 ### "Unmet peer dependency"
 
@@ -125,7 +128,4 @@ npm install @clawdreyhepburn/ovid @clawdreyhepburn/ovid-me
 
 ### "Unsupported Cedar syntax" errors
 
-The fallback engine rejects policies with features it can't evaluate (e.g., `unless`, `has`, `.contains()`). Either:
-
-- Install @janssenproject/cedarling_wasm for full Cedar support
-- Simplify your mandate to use only supported patterns (see [CEDAR-SUPPORT.md](CEDAR-SUPPORT.md))
+The fallback engine rejects policies with features it can't evaluate (e.g., `unless`, `has`, `.contains()`). Prefer `engine: "wasm"` (default) for full Cedar, or simplify mandates for the matcher (see [CEDAR-SUPPORT.md](CEDAR-SUPPORT.md)).

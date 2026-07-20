@@ -33,9 +33,10 @@ export interface OvidConfig {
   /**
    * Which Cedar evaluation engine to use.
    *
-   * - "wasm"     — Cedarling WASM only (fails if unavailable)
-   * - "fallback" — String-matching engine only
-   * - "auto"     — Try WASM first, fall back to string matcher
+   * - "wasm"     — native @cedar-policy/cedar-wasm only (fail-closed if unavailable)
+   * - "fallback" — string-matching engine only (explicit opt-in; no when/context)
+   * - "auto"     — try WASM first; on failure fail-closed (does NOT silent-degrade
+   *                to the string matcher — that path could not evaluate `when`)
    */
   engine: 'wasm' | 'fallback' | 'auto'
 
@@ -156,9 +157,9 @@ export interface OvidConfig {
   dashboardPort: number
 }
 
-/** Default configuration — safe, minimal, dry-run: see what would be blocked before enabling enforcement. */
+/** Default configuration — dry-run mandate mode; native cedar-wasm engine. */
 export const DEFAULT_CONFIG: OvidConfig = {
-  engine: 'auto',
+  engine: 'wasm',
   mandateMode: 'dry-run',
   subsetProof: 'off',
   proofFailure: 'deny',

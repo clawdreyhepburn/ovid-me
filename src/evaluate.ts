@@ -412,36 +412,46 @@ export interface EvaluateAsyncOptions {
 }
 
 /**
- * Evaluate a request using the WASM engine if available, otherwise fall back.
- * This is the preferred entry point when engine mode is 'auto' or 'wasm'.
+ * Evaluate a request using the native cedar-wasm engine, with an explicit
+ * string-matcher opt-in.
+ *
+ * Engine modes:
+ * - "wasm"     — native only. If WASM cannot decide, fail closed (deny).
+ * - "fallback" — string matcher only (cannot evaluate when/context).
+ * - "auto"     — try WASM first. On WASM failure: fail closed (deny).
+ *                Does NOT silently degrade to the string matcher — that path
+ *                could not evaluate `when` clauses and was the Carapace-class
+ *                bug. Use engine:"fallback" explicitly if you want the matcher.
  */
 export async function evaluateMandateAsync(
   cedarText: string,
   agentJti: string,
   request: EvaluateRequest,
-  engine: EngineMode = 'auto',
+  engine: EngineMode = 'wasm',
   options?: EvaluateAsyncOptions,
 ): Promise<{ decision: 'allow' | 'deny'; matchedPolicy?: string; reason?: string; engine: 'wasm' | 'fallback' }> {
-  if (engine === 'wasm' || engine === 'auto') {
-    const wasmResult = await evaluateWithWasm(cedarText, agentJti, request, {
-      externalSchema: options?.externalSchema,
-    });
-    if (wasmResult) {
-      return {
-        decision: wasmResult.decision,
-        reason: wasmResult.reasons.join('; ') || undefined,
-        engine: 'wasm',
-      };
-    }
-    if (engine === 'wasm') {
-      // WASM explicitly requested but unavailable
-      return { decision: 'deny', reason: 'WASM engine unavailable', engine: 'fallback' };
-    }
+  if (engine === 'fallback') {
+    const result = evaluateMandate(cedarText, request);
+    return { ...result, engine: 'fallback' };
   }
 
-  // Fallback to string-matching engine
-  const result = evaluateMandate(cedarText, request);
-  return { ...result, engine: 'fallback' };
+  // wasm or auto — both prefer native; neither silently falls to the matcher.
+  const wasmResult = await evaluateWithWasm(cedarText, agentJti, request, {
+    externalSchema: options?.externalSchema,
+  });
+  if (wasmResult) {
+    return {
+      decision: wasmResult.decision,
+      reason: wasmResult.reasons.join('; ') || undefined,
+      engine: 'wasm',
+    };
+  }
+
+  return {
+    decision: 'deny',
+    reason: 'WASM engine unavailable or evaluation failed (fail-closed; no silent string-matcher fallback)',
+    engine: 'wasm',
+  };
 }
 
 /**
@@ -463,7 +473,7 @@ export function evaluateMandate(
     if (err instanceof UnsupportedCedarSyntaxError) {
       return {
         decision: 'deny',
-        reason: `unsupported Cedar syntax: ${err.errors.map(e => e.unsupportedFeature).join(', ')}. Install @janssenproject/cedarling_wasm for full Cedar support.`,
+        reason: `unsupported Cedar syntax: ${err.errors.map(e => e.unsupportedFeature).join(', ')}. Use engine:"wasm" (native @cedar-policy/cedar-wasm) for full Cedar support.`,
       };
     }
     throw err;

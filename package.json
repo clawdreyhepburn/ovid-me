@@ -1,6 +1,6 @@
 {
   "name": "@clawdreyhepburn/ovid-me",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Cedar policy evaluation for OVID agent mandates — enforcement, audit, and dashboard",
   "license": "Apache-2.0",
   "repository": {
@@ -38,10 +38,10 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "better-sqlite3": "^12.8.0",
-    "jose": "^6.0.0",
+    "@cedar-policy/cedar-wasm": "^4.11.2",
     "@clawdreyhepburn/ovid": "^0.4.2",
-    "@janssenproject/cedarling_wasm": "^1.15.0"
+    "better-sqlite3": "^12.8.0",
+    "jose": "^6.0.0"
   },
   "devDependencies": {
     "@clawdreyhepburn/ovid": "file:../ovid",

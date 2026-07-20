@@ -104,7 +104,7 @@ export class AuthZenServer {
         implementation: 'OVID-ME AuthZEN PDP',
         version: OVID_ME_VERSION,
         spec_version: '1.0',
-        cedar_engine: 'cedarling-wasm',
+        cedar_engine: 'cedar-wasm',
       });
       return;
     }

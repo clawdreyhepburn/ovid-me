@@ -2,10 +2,10 @@
 
 OVID-ME includes two Cedar evaluation engines:
 
-## Cedarling WASM (recommended)
+## Native cedar-wasm (default, recommended)
 
-Full Cedar 4.x evaluation via @janssenproject/cedarling_wasm.
-Supports all Cedar features including:
+Full Cedar evaluation via official `@cedar-policy/cedar-wasm` (`isAuthorized`).
+Same engine family as Carapace 1.0.12+. Supports Cedar features including:
 
 - Entity hierarchies (`in` operator)
 - `unless` clauses
@@ -13,13 +13,18 @@ Supports all Cedar features including:
 - `has` operator
 - `.contains()`, `.containsAll()`, `.containsAny()`
 - IP and decimal extensions
-- Full `when`/`unless` context conditions
+- Full `when`/`unless` context conditions (including `context.path like "..."`)
 
-Automatically used when @janssenproject/cedarling_wasm is installed.
+This is the **default** (`engine: "wasm"`). If the native engine cannot load or
+evaluate a request, OVID-ME **fail-closes** (deny) — it does **not** silently
+degrade to the string matcher.
 
-## Fallback String Matcher
+`engine: "auto"` tries WASM first and also fail-closes on failure. It is not a
+path back to the matcher.
 
-Used when WASM is unavailable. Supports a **subset** of Cedar:
+## Fallback String Matcher (explicit opt-in only)
+
+Used only when you set `engine: "fallback"`. Supports a **subset** of Cedar:
 
 ### Supported
 
@@ -34,36 +39,21 @@ Used when WASM is unavailable. Supports a **subset** of Cedar:
 ### NOT supported (will be rejected with an error)
 
 - `unless` clauses
-- `principal == ...` or `resource == ...` in head
+- `principal == ...` or `resource == ...` in head (partial)
 - Boolean combinators in `when` (`&&`, `||`)
 - `has` operator
 - `.contains()`, `.containsAll()`, `.containsAny()`
 - IP/decimal extensions
 - Entity hierarchy (`in` on non-action types)
-- Context conditions other than `resource.path like "..."`
+- Context conditions other than simple path globs the matcher understands
 
 ### Behavior on unsupported syntax
 
-By default (strict mode), the fallback engine **rejects** policies with unsupported syntax rather than silently mis-evaluating them. This means:
-
-- If your mandate uses unsupported features, install @janssenproject/cedarling_wasm
-- Or simplify your mandate to use only supported patterns
-
-To check which engine is active, use the `ovid-me status` CLI command.
+By default (strict mode), the fallback engine **rejects** policies with unsupported syntax rather than silently mis-evaluating them. Prefer native `engine: "wasm"` for full Cedar.
 
 ## Cedar Schema
 
-Cedar requires all actions to be declared in the schema. The bundled `schema/Ovid.cedarschema` includes common agent actions (`read_file`, `write_file`, `exec`, `use_tool`, `web_fetch`, `message`, `spawn_agent`, `mcp_call`).
-
-If your mandate uses custom actions not listed in the schema, add them:
-
-```cedarschema
-// In schema/Ovid.cedarschema, add inside namespace Ovid { ... }:
-action "my_custom_action" appliesTo {
-  principal: [Agent],
-  resource: [Resource],
-  context: {},
-};
-```
-
-The WASM engine dynamically extracts actions from policy text, so it will work even without schema changes. The schema is primarily for Cedar CLI validation and documentation.
+The bundled `schema/Ovid.cedarschema` includes common agent actions. The native
+WASM path also synthesizes/augments schema from policy text and optional
+external schemas (e.g. Carapace `schema.json` under the `Jans` namespace), so
+custom actions referenced by a mandate still load.

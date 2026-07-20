@@ -81,7 +81,7 @@ This is the "stepwise scope narrowing" that's missing from raw RFC 8693, and it'
 
 The mandate inside each OVID token is a Cedar policy set. [Cedar](https://www.cedarpolicy.com/) is Amazon's authorization language — deterministic, analyzable, built for exactly this kind of structured policy evaluation.
 
-OVID-ME evaluates these mandates against tool calls using the Cedar WASM engine (with a strict-mode fallback parser). Default-deny semantics. Forbid overrides permit. No ambiguity.
+OVID-ME evaluates these mandates against tool calls using native `@cedar-policy/cedar-wasm` (same family as Carapace). Default engine is `wasm` and fail-closed — the string-matcher path is an explicit `engine: "fallback"` opt-in only (it cannot evaluate `when`/context). Default-deny semantics. Forbid overrides permit. No ambiguity.
 
 ## How It Works
 
@@ -177,7 +177,7 @@ import { resolveConfig } from '@clawdreyhepburn/ovid-me';
 
 const config = resolveConfig({
   mandateMode: 'enforce',    // 'enforce' | 'dry-run' | 'shadow'
-  engine: 'auto',            // 'wasm' | 'fallback' | 'auto'
+  engine: 'wasm',            // 'wasm' | 'fallback' | 'auto' (auto = wasm, fail-closed; no silent matcher)
   subsetProof: 'advisory',   // 'required' | 'advisory' | 'off'
   auditLog: '~/.ovid/audit.jsonl',
   auditDb: '~/.ovid/audit.db',

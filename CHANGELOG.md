@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.4.4] - 2026-07-20
+
+### Changed
+- **Native Cedar engine:** evaluation now uses official `@cedar-policy/cedar-wasm`
+  (`isAuthorized`) instead of `@janssenproject/cedarling_wasm`. Same family as
+  Carapace 1.0.12+. Cedarling dependency removed.
+- **Default `engine` is now `"wasm"`** (was `"auto"`).
+- **`engine: "auto"` no longer silent-degrades to the string matcher.** On WASM
+  failure both `wasm` and `auto` fail closed (deny) with a clear reason. The
+  string matcher remains available only via explicit `engine: "fallback"`.
+  Closes the Carapace-class bug where `when`/context policies looked enforced
+  but were evaluated by a matcher that cannot see conditions.
+- AuthZEN health advertises `cedar_engine: "cedar-wasm"`.
+
+### Fixed
+- Request actions not present in the synthesized/external schema are added
+  before `isAuthorized` (deny-path probes like unknown `rm_rf` no longer null
+  out of WASM).
+- External schema namespace wins over policy-detected namespace when rewriting
+  bare `Action::` / `Shell::` tokens (Carapace Jans integration).
+- Principal type prefers `request.principalType` / schema `Workload` over a
+  hardcoded `Agent` (Carapace `principal is Workload` permits).
+
+### Added
+- Regression test: when-clause path gating under native WASM (matching deny,
+  non-matching allow).
+
 ## [0.4.3] - 2026-07-13
 
 ### Fixed
