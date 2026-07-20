@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { MandateEngine } from '../src/mandate-engine.js';
+import { proverBinaryExists } from '../src/subset-prover.js';
 import type { CedarMandate } from '@clawdreyhepburn/ovid';
 
 const makeMandate = (cedar: string): CedarMandate => ({
@@ -45,6 +46,12 @@ describe('depth-3 subset soundness (red-team gate)', () => {
   });
 
   it('CONTROL: grandchild wanting read-only (subset of parent) must prove via SMT', async () => {
+    // Strict subset (not reflexive) requires the SMT prover. Skip on hosts
+    // without agent-authz-prover / cvc5 (e.g. default GitHub Actions runners).
+    if (!proverBinaryExists()) {
+      console.info('Skipping SMT CONTROL — prover binary not found');
+      return;
+    }
     const engine = engineFor();
     const inBounds = makeMandate(
       'permit(principal, action in [Ovid::Action::"read"], resource);',

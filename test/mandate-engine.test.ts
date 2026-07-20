@@ -61,8 +61,11 @@ describe('MandateEngine', () => {
 
   it('subset proof with policy source — exact match proven', async () => {
     const policy = 'permit(principal, action, resource);';
+    // Use structural exact fallback so this is not gated on the SMT binary
+    // (cvc5 / agent-authz-prover), which is absent on GitHub Actions runners.
     const engine = new MandateEngine({
       subsetProof: 'required',
+      structuralFallback: 'exact',
       policySource: { getEffectivePolicy: async () => policy },
     });
     const result = await engine.verifySubset(makeMandate(policy), 'parent-1');
