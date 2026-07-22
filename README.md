@@ -130,6 +130,25 @@ OVID-ME evaluates:
 npm install @clawdreyhepburn/ovid-me @clawdreyhepburn/ovid
 ```
 
+**Native audit DB (optional):** SQLite auditing uses `better-sqlite3`. After a Node upgrade, if tests or the dashboard fail with a `NODE_MODULE_VERSION` / bindings error, rebuild once:
+
+```bash
+npm run rebuild:native
+# or: npm rebuild better-sqlite3
+```
+
+If the native addon is unavailable (e.g. `npm install --ignore-scripts`), evaluation still works; audit falls back to JSONL and the forensics dashboard stays off.
+
+**OpenClaw users:** prefer the plugins rather than wiring the library by hand:
+
+```bash
+openclaw plugins install @clawdreyhepburn/openclaw-ovid
+openclaw plugins install @clawdreyhepburn/openclaw-ovid-me
+# optional deployment ceiling:
+openclaw plugins install @clawdreyhepburn/carapace
+openclaw carapace setup
+```
+
 ### Evaluate a mandate
 
 ```typescript

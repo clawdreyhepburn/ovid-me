@@ -8,7 +8,25 @@ function tmpDb(): string {
   return join(tmpdir(), `ovid-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
 }
 
-describe('AuditDatabase', () => {
+function canLoadBetterSqlite3(): boolean {
+  try {
+    // Same lazy path the library uses — if Node ABI drifted after an upgrade,
+    // skip instead of cascading constructor/afterEach failures.
+    const path = tmpDb();
+    const db = new AuditDatabase(path);
+    db.close();
+    try { unlinkSync(path); } catch {}
+    try { unlinkSync(path + '-wal'); } catch {}
+    try { unlinkSync(path + '-shm'); } catch {}
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const sqliteOk = canLoadBetterSqlite3();
+
+describe.skipIf(!sqliteOk)('AuditDatabase', () => {
   let db: AuditDatabase;
   let dbPath: string;
 
@@ -18,7 +36,7 @@ describe('AuditDatabase', () => {
   });
 
   afterEach(() => {
-    db.close();
+    try { db?.close(); } catch {}
     try { unlinkSync(dbPath); } catch {}
     try { unlinkSync(dbPath + '-wal'); } catch {}
     try { unlinkSync(dbPath + '-shm'); } catch {}

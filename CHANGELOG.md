@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.5] - 2026-07-22
+
+### Docs / DX
+- Documented the **Node ABI / better-sqlite3 rebuild** path. After a Node major/minor
+  upgrade, `npm test` can fail with `NODE_MODULE_VERSION` mismatches until
+  `npm run rebuild:native` (or `npm rebuild better-sqlite3`). This is an install-host
+  issue, not a logic regression — the library already lazy-loads the binding so a
+  missing addon degrades to JSONL-only audit in production.
+- Added `engines.node: ">=20"` and `npm run rebuild:native` script.
+- Audit DB tests now **skip cleanly** when the native binding cannot load, instead of
+  cascading `db.close` TypeErrors that look like product failures.
+
 ## [0.4.4] - 2026-07-20
 
 ### Changed

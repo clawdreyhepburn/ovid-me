@@ -8,7 +8,23 @@ function tmpDb(): string {
   return join(tmpdir(), `ovid-load-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
 }
 
-describe('Load Tests', () => {
+function canLoadBetterSqlite3(): boolean {
+  try {
+    const path = tmpDb();
+    const probe = new AuditDatabase(path);
+    probe.close();
+    try { unlinkSync(path); } catch {}
+    try { unlinkSync(path + '-wal'); } catch {}
+    try { unlinkSync(path + '-shm'); } catch {}
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const sqliteOk = canLoadBetterSqlite3();
+
+describe.skipIf(!sqliteOk)('Load Tests', () => {
   let db: AuditDatabase;
   let dbPath: string;
 
@@ -47,7 +63,7 @@ describe('Load Tests', () => {
   });
 
   afterAll(() => {
-    db.close();
+    try { db?.close(); } catch {}
     try { unlinkSync(dbPath); } catch {}
     try { unlinkSync(dbPath + '-wal'); } catch {}
     try { unlinkSync(dbPath + '-shm'); } catch {}
