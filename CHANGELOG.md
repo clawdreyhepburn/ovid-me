@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.6] - 2026-07-22
+
+### Fixed
+- **Namespace-insensitive resource-type match.** A policy written
+  fully-qualified (`resource == Ovid::Shell::"rm"`, as the shared mandate
+  builder and Carapace both emit) now matches a request carrying a bare
+  `resourceType: "Shell"`. Previously the string compare `Ovid::Shell` !==
+  `Shell` silently failed the type gate, so binary/host-scoped grants from the
+  builder never fired. Compares only the final `::` segment now.
+
+### Added
+- Round-trip tests against `@clawdreyhepburn/ovid` `buildMandate()` (shell
+  allowlist/forbid, file path glob, web host allowlist, default mandate) and a
+  regression test pinning the namespace-insensitive type match.
+- Dependency bumped to `@clawdreyhepburn/ovid` `^0.5.0` (shared vocabulary +
+  mandate builder).
+
 ## [0.4.5] - 2026-07-22
 
 ### Docs / DX

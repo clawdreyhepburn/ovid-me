@@ -373,6 +373,17 @@ function matchGlob(pattern: string, value: string): boolean {
   return re.test(value);
 }
 
+/**
+ * Namespace-insensitive Cedar entity-type comparison. Compares only the final
+ * `::`-delimited segment so `Ovid::Shell`, `Jans::Shell`, and bare `Shell` all
+ * match. (Cedar entity types are namespaced; the runtime mapper passes bare
+ * kinds while policies are fully-qualified.)
+ */
+function typesMatch(a: string, b: string): boolean {
+  const last = (s: string) => s.split('::').pop() ?? s;
+  return last(a) === last(b);
+}
+
 function policyMatchesRequest(policy: ParsedPolicy, request: EvaluateRequest): boolean {
   // Check action constraint
   if (policy.actions !== null && !policy.actions.includes(request.action)) {
@@ -393,7 +404,14 @@ function policyMatchesRequest(policy: ParsedPolicy, request: EvaluateRequest): b
       // When the policy names a type, require the request to name it too.
       // Requests without `resourceType` are given a free pass on typed
       // equalities so that deployments migrating piecemeal don't break.
-      if (eq.type && request.resourceType && eq.type !== request.resourceType) {
+      //
+      // Type comparison is namespace-INSENSITIVE: a policy written as
+      // `Ovid::Shell::"rm"` (fully-qualified) and a request carrying the bare
+      // `resourceType: "Shell"` refer to the same entity kind. Both the
+      // shared mandate builder (Ovid:: namespace) and Carapace (Jans::) emit
+      // fully-qualified types, while the runtime mapper passes bare kinds.
+      // Comparing only the last `::` segment reconciles them.
+      if (eq.type && request.resourceType && !typesMatch(eq.type, request.resourceType)) {
         return false;
       }
       return true;
